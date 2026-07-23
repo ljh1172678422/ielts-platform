@@ -38,7 +38,8 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
-ignore = ["E501"]
+# B008: FastAPI 惯例在默认参数用 Depends()/Header()/Query()，非真实 bug
+ignore = ["E501", "B008"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
