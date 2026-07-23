@@ -205,3 +205,22 @@ async def login(
         "token_type": "bearer",
         "expires_in": expires_in,
     }
+
+
+async def logout(
+    db: AsyncSession, user_id: int, *, ip_address: str | None = None
+) -> None:
+    """退出登录 (auth.md §4.4)。
+
+    MVP 无状态退出（ADR-027）：仅写 user_logout 日志，不撤销 token。
+    token 自然过期，前端负责清除本地存储。
+    """
+    log = UserActivityLog(
+        user_id=user_id,
+        action="user_logout",
+        entity_type="user",
+        entity_id=user_id,
+        ip_address=ip_address,
+    )
+    db.add(log)
+    await db.flush()

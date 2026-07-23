@@ -4,8 +4,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db
+from app.core.dependencies import get_current_user, get_db
 from app.core.exceptions import success
+from app.models.user import User
 from app.modules.auth import service
 from app.modules.auth.schemas import LoginRequest, RegisterRequest
 
@@ -42,3 +43,20 @@ async def login(
     ip = request.client.host if request.client else None
     data = await service.login(db, req, ip_address=ip)
     return success(data)
+
+
+@router.post("/logout", response_model=None)
+async def logout(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """退出登录 (auth.md §4)。
+
+    MVP 无状态退出（ADR-027）：仅写日志，不撤销 token。
+    成功 HTTP 200，data=null。
+    鉴权失败：2001/2002 由 get_current_user 抛出。
+    """
+    ip = request.client.host if request.client else None
+    await service.logout(db, current_user.id, ip_address=ip)
+    return success(None)
