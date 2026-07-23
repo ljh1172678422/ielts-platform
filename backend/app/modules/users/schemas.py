@@ -98,14 +98,14 @@ class UserGoalCreate(BaseModel):
 
 
 class UserGoalUpdate(BaseModel):
-    """更新目标请求 (users.md §7.1)，全字段可选。"""
+    """更新目标请求 (users.md §7.1)，全量替换，status 必填。"""
 
     target_score: float | None = Field(default=None, ge=0, le=9)
     current_level: str | None = Field(default=None, max_length=20)
     exam_date: date | None = None
     daily_goal_minutes: int | None = Field(default=None, ge=0)
     weekly_goal_minutes: int | None = Field(default=None, ge=0)
-    status: str | None = Field(default=None, pattern="^(active|achieved|archived)$")
+    status: str = Field(pattern="^(active|achieved|archived)$")
 
 
 class UserGoalPublic(BaseModel):
@@ -122,3 +122,10 @@ class UserGoalPublic(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+
+
+class GoalsResponse(BaseModel):
+    """目标列表响应 (users.md §5.2)。current + history，非分页。"""
+
+    current: UserGoalPublic | None
+    history: list[UserGoalPublic]

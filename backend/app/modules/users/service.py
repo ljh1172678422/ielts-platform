@@ -14,9 +14,19 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import AppError
 from app.core.security import hash_password, verify_password
-from app.models.user import User, UserProfile
+from app.models.activity import UserActivityLog
+from app.models.user import User, UserGoal, UserProfile
+from app.modules.users.repository import (
+    get_active_goal,
+    get_goal_by_id,
+    get_goals_by_user,
+)
 from app.modules.users.schemas import (
+    GoalsResponse,
     ProfileUpdateRequest,
+    UserGoalCreate,
+    UserGoalPublic,
+    UserGoalUpdate,
     UserProfilePublic,
     UserPublic,
 )
@@ -122,3 +132,145 @@ async def update_password(
 
     user.password_hash = hash_password(new_password)
     await db.flush()
+
+
+def _goal_to_public(goal: UserGoal) -> UserGoalPublic:
+    """UserGoal ORM → UserGoalPublic（id 转 str）。"""
+    return UserGoalPublic(
+        id=str(goal.id),
+        target_score=float(goal.target_score) if goal.target_score is not None else None,
+        current_level=goal.current_level,
+        exam_date=goal.exam_date,
+        daily_goal_minutes=goal.daily_goal_minutes,
+        weekly_goal_minutes=goal.weekly_goal_minutes,
+        status=goal.status,
+        created_at=goal.created_at,
+        updated_at=goal.updated_at,
+    )
+
+
+async def list_goals(
+    db: AsyncSession, user_id: int, status_filter: str | None = None
+) -> GoalsResponse:
+    """获取目标列表 (users.md §5)。
+
+    返回 {current, history}：current = 第一条 active，history = 其余按 updated_at DESC。
+    """
+    goals = await get_goals_by_user(db, user_id, status=status_filter)
+    current = None
+    history = []
+    for g in goals:
+        if g.status == "active" and current is None:
+            current = _goal_to_public(g)
+        else:
+            history.append(_goal_to_public(g))
+    # history 按 updated_at DESC（repository 已按 created_at DESC，再排一次 updated_at）
+    history.sort(key=lambda x: x.updated_at, reverse=True)
+    return GoalsResponse(current=current, history=history)
+
+
+async def create_goal(
+    db: AsyncSession, user_id: int, req: UserGoalCreate
+) -> UserGoalPublic:
+    """创建目标 (users.md §6)。
+
+    已存在 active → 1004/409。至少一字段非空。写 goal_created 日志。
+    """
+    # 至少一字段非空（users.md §6.1）
+    fields = req.model_dump()
+    if all(v is None for v in fields.values()):
+        raise AppError(
+            code=1001,
+            message="参数校验失败",
+            http_status=422,
+            details=[{"field": "body", "message": "at least one field required"}],
+        )
+
+    # ADR-014: 已存在 active 目标 → 1004
+    existing = await get_active_goal(db, user_id)
+    if existing is not None:
+        raise AppError(
+            code=1004,
+            message="已存在 active 目标",
+            http_status=409,
+            details=[{"field": "status", "message": "active goal already exists"}],
+        )
+
+    goal = UserGoal(
+        user_id=user_id,
+        target_score=req.target_score,
+        current_level=req.current_level,
+        exam_date=req.exam_date,
+        daily_goal_minutes=req.daily_goal_minutes,
+        weekly_goal_minutes=req.weekly_goal_minutes,
+        status="active",
+    )
+    db.add(goal)
+    await db.flush()
+
+    log = UserActivityLog(
+        user_id=user_id,
+        action="goal_created",
+        entity_type="user_goal",
+        entity_id=goal.id,
+    )
+    db.add(log)
+    await db.flush()
+
+    return _goal_to_public(goal)
+
+
+async def update_goal(
+    db: AsyncSession,
+    user_id: int,
+    goal_id: int,
+    req: UserGoalUpdate,
+) -> UserGoalPublic:
+    """更新目标 (users.md §7)。
+
+    goal 不存在/不属于用户 → 1002/404。
+    改回 active 且已有其他 active → 1004/409。
+    status 变化 → 写 goal_updated 日志。
+    """
+    goal = await get_goal_by_id(db, goal_id, user_id)
+    if goal is None:
+        raise AppError(
+            code=1002,
+            message="目标不存在",
+            http_status=404,
+        )
+
+    old_status = goal.status
+
+    # 若改为 active 且原非 active → 检查是否已有其他 active
+    if req.status == "active" and old_status != "active":
+        existing_active = await get_active_goal(db, user_id)
+        if existing_active is not None and existing_active.id != goal.id:
+            raise AppError(
+                code=1004,
+                message="已存在 active 目标",
+                http_status=409,
+                details=[{"field": "status", "message": "another active goal exists"}],
+            )
+
+    # 全量替换（status 必填）
+    goal.target_score = req.target_score
+    goal.current_level = req.current_level
+    goal.exam_date = req.exam_date
+    goal.daily_goal_minutes = req.daily_goal_minutes
+    goal.weekly_goal_minutes = req.weekly_goal_minutes
+    goal.status = req.status
+    await db.flush()
+
+    # status 变化 → 写日志
+    if old_status != goal.status:
+        log = UserActivityLog(
+            user_id=user_id,
+            action="goal_updated",
+            entity_type="user_goal",
+            entity_id=goal.id,
+        )
+        db.add(log)
+        await db.flush()
+
+    return _goal_to_public(goal)
