@@ -147,3 +147,65 @@ export interface LoginRequest {
   email: string;
   password: string;
 }
+
+// ---------------------------------------------------------------------------
+// 目标域（users.md §5.2 / §9，Phase 4 补充）
+// ---------------------------------------------------------------------------
+
+/** 目标状态（users.md §5）。 */
+export type GoalStatus = 'active' | 'achieved' | 'archived';
+
+/** 学习目标（users.md §5.2 / §9.2）。 */
+export interface UserGoal {
+  id: ID;
+  target_score: number | null;
+  current_level: string | null;
+  exam_date: ISODate | null;
+  daily_goal_minutes: number | null;
+  weekly_goal_minutes: number | null;
+  status: GoalStatus;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
+
+/** 目标列表响应（users.md §5.2，非分页，含 current + history）。 */
+export interface GoalsResponse {
+  current: UserGoal | null;
+  history: UserGoal[];
+}
+
+// ---------------------------------------------------------------------------
+// users 模块请求 DTO（users.md §9.1）
+// ---------------------------------------------------------------------------
+
+/** 修改资料请求（users.md §3.1，全量替换 profile 字段）。 */
+export interface UpdateProfileRequest {
+  nickname: string | null;
+  avatar_url: string | null;
+  timezone: string;
+}
+
+/** 修改密码请求（users.md §4.1）。 */
+export interface ChangePasswordRequest {
+  old_password: string;
+  new_password: string;
+}
+
+/** 创建目标请求（users.md §6.1，至少一字段非空）。 */
+export interface CreateGoalRequest {
+  target_score?: number | null;
+  current_level?: string | null;
+  exam_date?: ISODate | null;
+  daily_goal_minutes?: number | null;
+  weekly_goal_minutes?: number | null;
+}
+
+/** 更新目标请求（users.md §7.1，全量替换，status 必填）。 */
+export interface UpdateGoalRequest {
+  target_score?: number | null;
+  current_level?: string | null;
+  exam_date?: ISODate | null;
+  daily_goal_minutes?: number | null;
+  weekly_goal_minutes?: number | null;
+  status: GoalStatus;
+}

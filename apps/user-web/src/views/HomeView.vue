@@ -35,7 +35,10 @@ function goRegister(): void {
             {{ authStore.role }}
           </span>
         </p>
-        <el-button class="mt-4" @click="handleLogout">退出登录</el-button>
+        <div class="mt-4 flex justify-center gap-3">
+          <el-button @click="router.push({ name: 'profile' })">我的</el-button>
+          <el-button @click="handleLogout">退出登录</el-button>
+        </div>
       </div>
 
       <!-- 未登录：展示登录/注册入口 -->

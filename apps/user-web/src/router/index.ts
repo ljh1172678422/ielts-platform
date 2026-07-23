@@ -23,8 +23,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/RegisterView.vue'),
         meta: { public: true },
       },
-      // /profile 由 Phase 4.8 实现，此处预留受保护路由占位
-      // { path: 'profile', name: 'profile', component: () => import('@/views/ProfileView.vue') },
+      // /profile 受保护（无 meta.public → 守卫要求 authenticated），Phase 4.8
+      {
+        path: 'profile',
+        name: 'profile',
+        component: () => import('@/views/ProfileView.vue'),
+      },
     ],
   },
 ]
