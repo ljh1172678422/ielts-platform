@@ -41,6 +41,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/QuestionDetailView.vue'),
         props: true,
       },
+      // 练习页（Phase 7.6，受保护：practice.md §1.2 全接口 Bearer）
+      {
+        path: 'practice/:id',
+        name: 'practice',
+        component: () => import('@/views/PracticeView.vue'),
+        props: true,
+      },
     ],
   },
 ]

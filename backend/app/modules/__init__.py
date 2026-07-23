@@ -5,7 +5,14 @@
 """
 from app.modules.admin import admin_router
 from app.modules.auth import router as auth_router
+from app.modules.practice import practice_router
 from app.modules.questions import questions_router
 from app.modules.users import router as users_router
 
-__all__ = ["admin_router", "auth_router", "questions_router", "users_router"]
+__all__ = [
+    "admin_router",
+    "auth_router",
+    "practice_router",
+    "questions_router",
+    "users_router",
+]

@@ -17,7 +17,7 @@
 
 ## 2. 当前阶段
 
-**Phase 6 — 题库系统（用户端）（已完成）** → 下一步 **Phase 7 — 练习系统**
+**Phase 7 — 练习系统（已完成）** → 下一步 **Phase 8 — 录音上传/下载**
 
 ```text
 [完成] === Phase 0 文档设计阶段全部完成 ===
@@ -53,6 +53,12 @@
          新增 models/{favorite,practice}.py ORM；questions.md 契约对齐；test_questions 17 单测全绿
   - 6.4 user-web 题库页 (QuestionsView 列表+筛选+收藏星标乐观更新+分页 / QuestionDetailView 详情+Cue Card 渲染+收藏+跳练习入口)
          type-check + build 通过（1659 modules，两 View 独立 chunk）
+[完成] === Phase 7 练习系统 ===
+  - 7.1-7.5 practice 后端模块 (会话创建/获取/完成 + attempt 创建/更新；状态机 created→in_progress→completed；
+         ADR-015 跨表约束校验；5001 会话不存在/5002 状态非法/5003 越权/5004 题数不足/5006 未完成题目)
+         扩展 models/practice.py (PracticeSession/PracticeAttempt)；practice.md 契约对齐；test_practice 单测全绿
+  - 7.6 user-web 练习页 (PracticeView 状态机 UI + 进度统计 + ADR-015 完成校验 + QuestionDetailView 开始练习入口创建会话跳转)
+         路由 /practice/:id；type-check + build 通过（PracticeView 独立 chunk 7.80 kB）
 [待办-用户] === 本地 Docker 验证 ===
   ⚠ 沙箱不做预览/运行测试（无 Docker / 无 PG）。用户将在本地 docker compose up 后统一验证：
      - 1.6 四服务全绿 + /health 200
@@ -60,38 +66,43 @@
      - 4.x auth/users 全链路
      - 5.x admin 后台登录 + dashboard/users/topics/tags/questions CRUD + 启停
      - 6.x 题库浏览/筛选/收藏/详情 4001/4002 分级
+     - 7.x 练习会话全生命周期（创建/续练/答题状态机/ADR-015 完成）
   沙箱侧只保证：单测全绿、type-check + build 通过、ruff 通过、迁移 offline SQL 语法正确。
-[待办]   Phase 7+ 练习/录音/学习数据/首页/测试/部署
+[待办]   Phase 8+ 录音/学习数据/首页/测试/部署
 ```
 
 ---
 
 ## 3. 当前任务
 
-- **Phase 6 题库系统（用户端）已全部完成**（6.1–6.4）：questions 后端模块 + user-web 题库页/详情页。
-- **下一步**：阶段 7 练习系统 —— practice 模块（会话/attempt 状态机）。
+- **Phase 7 练习系统已全部完成**（7.1–7.6）：practice 后端模块（会话/attempt 状态机 + ADR-015）+ user-web 练习页。
+- **下一步**：阶段 8 录音上传/下载 —— recording 模块（MediaRecorder + 上传/下载 + study_records 同步）。
 - **沙箱不做预览/运行验证**（无 Docker / 无 PG）；用户将在本地 docker compose up 后统一验收。
 - 沙箱侧仅保证：单测全绿、`type-check + build` 通过、`ruff` 通过。
 
-### 3.1 当前任务边界（阶段 7 生效）
+### 3.1 当前任务边界（阶段 8 生效）
 
-**阶段 7 允许：**
-- 按 development-plan.md §9 顺序执行任务 7.1–7.6。
-- 实现 `app/modules/practice/`：会话创建/获取、attempt 创建/更新、会话完成（practice.md §2-§8）。
-- 扩展 `app/models/practice.py`：追加 PracticeSession / PracticeAttempt 完整模型（Phase 6 已建 PracticeSessionQuestion）。
-- 实现 user-web 练习页 `/practice/:id`（状态机 UI）。
-- 复用 Phase 6 questions 模块（practice.md §2 创建会话需查 published 题目）。
+**阶段 8 允许：**
+- 按 development-plan.md §10 顺序执行任务 8.1–8.6。
+- 实现 recording 上传/下载 API（practice.md §6/§7，POST/GET /attempts/{id}/recording）。
+- 录音存储：开发本地 FS / 生产 MinIO（system-architecture §5.4）。
+- 后端读取录音元数据计算 duration_seconds（ADR-020）；mime_type 不转码（ADR-021）。
+- study_records 同步更新（ADR-022，录音上传/会话完成事务内 upsert）。
+- ADR-015 跨表约束：录音上传事务内 attempt→submitted（不可前端直设）。
+- 实现 user-web 录音组件（MediaRecorder 状态机 IDLE→...→UPLOADED，system-architecture §5.4）。
+- 复用 Phase 7 practice 模块（录音归属 attempt）。
 - 一次只执行一个任务，完成即 commit + 更新 AI_CONTEXT。
 
-**禁止（阶段 7 仍生效）：**
+**禁止（阶段 8 仍生效）：**
 - ❌ 修改已锁定文档（PROJECT_SPEC / database-design / system-architecture / 全部 API 文档 / user-flow / development-plan）。
 - ❌ 改变 DB schema（阶段 2 已锁定 15 表 + 约束 + 索引；如需变更先走修改规则）。
 - ❌ 偏离 system-architecture §3 分层（router→service→repository，session 注入 repository）。
 - ❌ 改变统一响应结构 `{code,message,data,details?}`。
 - ❌ 改变状态机或核心事实链（ADR-015 attempt 跨表约束）。
+- ❌ 前端直设 attempt status=submitted（只能由录音上传事务设置）。
 - ❌ 一次性生成整个项目（PROJECT_SPEC §开发原则）。
 
-> 阶段 6 → 阶段 7 转换已由用户连续执行模式授权覆盖，无需再次确认。
+> 阶段 7 → 阶段 8 转换已由用户连续执行模式授权覆盖，无需再次确认。
 
 ---
 
@@ -167,6 +178,16 @@
 | user-web 题库页 | `apps/user-web/src/views/QuestionsView.vue` | ✅ | Part/难度/keyword/排序/仅收藏 筛选 + 分页 + 收藏星标乐观更新；type-check+build 通过 |
 | user-web 题目详情页 | `apps/user-web/src/views/QuestionDetailView.vue` | ✅ | 完整字段 + Cue Card 按 \n/- 渲染 + 收藏 + 跳练习入口(Phase 7)；type-check+build 通过 |
 | 共享类型（题库域） | `packages/types/src/index.ts` | ✅ | +QuestionListItem/QuestionDetail/FavoriteResponse/PaginatedQuestions/QuestionListQuery/TopicRef/TagRef/QuestionSort |
+
+**代码模块（Phase 7 练习系统）**：
+
+| 模块 | 路径 | 状态 | 验收 |
+| --- | --- | --- | --- |
+| practice ORM（完整） | `backend/app/models/practice.py` | ✅ | PracticeSession + PracticeSessionQuestion(Phase6) + PracticeAttempt + Recording 四表 ORM，对齐 database-design v0.4 §3.3 |
+| practice 后端模块 | `backend/app/modules/practice/{router,service,repository,schemas}.py` | ✅ | 5 接口：会话创建/获取/完成 + attempt 创建/更新；状态机 created→in_progress→completed；ADR-015 跨表约束；5001/5002/5003/5004/5006 错误码；test_practice 单测全绿 |
+| user-web 练习页 | `apps/user-web/src/views/PracticeView.vue` | ✅ | 状态机 UI（pending→recording→skipped/failed/submitted）+ 进度统计 + ADR-015 完成校验 + 续练；type-check+build 通过 |
+| 练习入口 | `apps/user-web/src/views/QuestionDetailView.vue` + `router/index.ts` | ✅ | 题目详情"开始练习"创建会话(mode=topic)+跳 /practice/:id；路由守卫受保护 |
+| 共享类型（练习域） | `packages/types/src/index.ts` | ✅ | +PracticeSession/SessionQuestion/Attempt/Recording/SessionStatus/AttemptStatus/PracticeMode/QuestionSnapshot + 请求 DTO |
 
 **后端关键文件（Phase 3-4 已实现）**：
 - `backend/app/main.py` — create_app() 工厂 + /health + auth/users 路由注册
@@ -427,3 +448,5 @@ admin:       users / topics / tags / questions (CRUD + 启停)
 | 2026-07-23 | **Phase 3 后端基础架构全部完成** | security.py(JWT+bcrypt 原生 API) + dependencies.py(get_current_user/require_admin) + exceptions.py(4 异常处理器) + 模块骨架；GitHub 仓库初始化 + 推送；进入 Phase 4 |
 | 2026-07-23 | **Phase 4 用户系统全部完成** | auth(register/login/logout) + users(me/password/goals) 8 接口 + 23 单测全绿；user-web 登录/注册/我的页 + auth store + api 拦截器 + 路由守卫；type-check+build 通过；进入 Phase 5 |
 | 2026-07-23 | **Phase 5 管理后台全部完成** | admin 后端(dashboard/users/topics/tags/questions CRUD + 启停) + test_admin_* 单测全绿；admin-web 骨架 + Dashboard/Users/Topics/Tags/Questions 5 页；沙箱放弃预览测试（无 Docker/PG），本地 docker 验证待办入计划；type-check+build 通过；进入 Phase 6 |
+| 2026-07-23 | **Phase 6 题库系统（用户端）全部完成** | questions 后端模块(列表/详情/收藏) + favorites/practice ORM + test_questions 17 单测全绿；user-web 题库页/详情页(Cue Card 渲染+收藏+跳练习入口)；type-check+build 通过；进入 Phase 7 |
+| 2026-07-23 | **Phase 7 练习系统全部完成** | practice 后端模块(会话创建/获取/完成 + attempt 创建/更新；状态机 + ADR-015 跨表约束) + test_practice 单测全绿；扩展 models/practice.py(PracticeSession/PracticeAttempt/Recording)；user-web PracticeView 状态机 UI + 进度统计 + QuestionDetailView 开始练习入口；路由 /practice/:id；type-check+build 通过(PracticeView 独立 chunk 7.80 kB)；进入 Phase 8 |

@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api, ApiError } from '@/api'
-import type { FavoriteResponse, QuestionDetail } from '@ielts/types'
+import type { FavoriteResponse, PracticeSession, QuestionDetail } from '@ielts/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -11,6 +11,7 @@ const router = useRouter()
 const loading = ref(false)
 const detail = ref<QuestionDetail | null>(null)
 const favoriting = ref(false)
+const startingPractice = ref(false)
 
 const questionId = computed(() => String(route.params.id))
 
@@ -46,9 +47,26 @@ async function toggleFavorite(): Promise<void> {
   }
 }
 
-/** 开始练习：练习系统属 Phase 7，此处预留入口（questions.md §8 衔接 practice.md）。 */
-function startPractice(): void {
-  ElMessage.info('练习功能将在下一阶段（Phase 7）上线')
+/**
+ * 开始练习（questions.md §8 衔接 practice.md §2）：
+ * 以当前题目所在主题创建会话（mode=topic），默认 5 题；成功后跳练习页。
+ * 5004（题数不足）等业务错误由拦截器抛 ApiError，提示用户可用题数。
+ */
+async function startPractice(): Promise<void> {
+  if (!detail.value || startingPractice.value) return
+  startingPractice.value = true
+  try {
+    const session = await api.post<PracticeSession>('/practice/sessions', {
+      mode: 'topic',
+      topic_id: detail.value.topic.id,
+      question_count: 5,
+    })
+    await router.push({ name: 'practice', params: { id: session.id } })
+  } catch (err) {
+    ElMessage.error(err instanceof ApiError ? err.message : '创建练习会话失败')
+  } finally {
+    startingPractice.value = false
+  }
 }
 
 function goBack(): void {
@@ -135,7 +153,7 @@ onMounted(fetchDetail)
               >
                 {{ detail.is_favorited ? '★ 已收藏' : '☆ 收藏' }}
               </el-button>
-              <el-button type="primary" @click="startPractice">开始练习</el-button>
+              <el-button type="primary" :loading="startingPractice" @click="startPractice">开始练习</el-button>
             </footer>
           </article>
         </template>

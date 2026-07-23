@@ -89,14 +89,14 @@ export type QuestionSourceType = 'official' | 'historical' | 'mock' | 'custom';
 /** IELTS Speaking Part。 */
 export type SpeakingPart = 1 | 2 | 3;
 
-/** 练习会话状态。 */
-export type SessionStatus = 'in_progress' | 'completed' | 'abandoned';
+/** 练习会话状态 (practice.md §2.2)。 */
+export type SessionStatus = 'created' | 'in_progress' | 'completed' | 'abandoned' | 'expired';
 
-/** 尝试状态 (ADR-015)。 */
-export type AttemptStatus = 'pending' | 'recording' | 'submitted' | 'skipped';
+/** 尝试状态 (ADR-015 / practice.md §3.2)。 */
+export type AttemptStatus = 'pending' | 'recording' | 'submitted' | 'skipped' | 'failed';
 
-/** 录音状态。 */
-export type RecordingStatus = 'uploading' | 'uploaded' | 'failed';
+/** 录音状态 (practice.md §3.2)。 */
+export type RecordingStatus = 'uploading' | 'uploaded' | 'failed' | 'deleted';
 
 // ---------------------------------------------------------------------------
 // 用户域实体视图（auth.md §7.2 / users.md §2.2，Phase 4 补充）
@@ -270,4 +270,87 @@ export interface QuestionListQuery {
   difficulty?: number;
   sort?: QuestionSort;
   is_favorited?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// 练习域（practice.md §10，Phase 7 补充）
+// ---------------------------------------------------------------------------
+
+/** 练习模式 (practice.md §2.1)。 */
+export type PracticeMode = 'random' | 'topic' | 'part';
+
+/** 题目快照（不可变，ADR-016，practice.md §2.2）。 */
+export interface QuestionSnapshot {
+  part: SpeakingPart;
+  title: string;
+  content: string;
+  cue_card: string | null;
+  topic_name: string | null;
+  difficulty: number | null;
+}
+
+/** 录音 (practice.md §3.2，Phase 8 写入，Phase 7 恒为 null)。 */
+export interface Recording {
+  id: ID;
+  status: RecordingStatus;
+  mime_type: string;
+  duration_seconds: number | null;
+  file_size: number | null;
+  created_at: ISODateTime;
+}
+
+/** 答题尝试 (practice.md §3.2/§4.2)。 */
+export interface Attempt {
+  id: ID;
+  session_question_id: ID;
+  attempt_number: number;
+  status: AttemptStatus;
+  started_at: ISODateTime | null;
+  submitted_at: ISODateTime | null;
+  duration_seconds: number | null;
+  recording: Recording | null;
+}
+
+/** 会话题目（含 snapshot 与 attempts，practice.md §2.2）。 */
+export interface SessionQuestion {
+  id: ID;
+  session_id: ID;
+  question_id: ID;
+  sort_order: number;
+  snapshot: QuestionSnapshot;
+  attempts: Attempt[];
+}
+
+/** 练习会话 (practice.md §2.2)。 */
+export interface PracticeSession {
+  id: ID;
+  status: SessionStatus;
+  mode: PracticeMode;
+  part_filter: number | null;
+  topic_filter: ID | null;
+  question_count: number;
+  started_at: ISODateTime | null;
+  completed_at: ISODateTime | null;
+  duration_seconds: number | null;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+  questions: SessionQuestion[];
+}
+
+/** 创建练习会话请求 (practice.md §2.1)。 */
+export interface CreateSessionRequest {
+  mode: PracticeMode;
+  part?: SpeakingPart;
+  topic_id?: ID;
+  question_count: number;
+}
+
+/** 创建答题尝试请求 (practice.md §4.1)。 */
+export interface CreateAttemptRequest {
+  session_question_id: ID;
+}
+
+/** 更新答题状态请求 (practice.md §5.1，submitted 不可前端直设)。 */
+export interface UpdateAttemptRequest {
+  status: 'recording' | 'skipped' | 'failed';
 }
