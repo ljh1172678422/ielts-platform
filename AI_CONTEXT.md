@@ -17,7 +17,7 @@
 
 ## 2. 当前阶段
 
-**Phase 4 — 用户系统（已完成）** → 进入 **Phase 5 — 管理后台**
+**Phase 5 — 管理后台（已完成）** → 下一步 **Phase 6 — 题库系统（用户端）**
 
 ```text
 [完成] === Phase 0 文档设计阶段全部完成 ===
@@ -41,25 +41,31 @@
   - 3.6 响应中间件 (core/exceptions.py: 4 异常处理器全链路信封化 AppError/422/HTTPException/500)
   - 3.7 模块骨架 (modules/{auth,users}/{router,service,repository,schemas}.py)
 [完成] === Phase 4 用户系统全部完成 ===
-  - 4.1 注册 API (POST /auth/register: 事务建 user+profile+log + 签 JWT, 3001 邮箱冲突)
-  - 4.2 登录 API (POST /auth/login: 3002 防枚举, 2004 禁用, 更新 last_login_at)
-  - 4.3 退出 API (POST /auth/logout: 无状态 ADR-027, 仅写日志)
-  - 4.4 用户资料 (GET/PUT /users/me: timezone IANA 校验, 全量替换)
-  - 4.5 改密 API (PUT /users/me/password: 3003 旧密码错, new≠old)
-  - 4.6 目标 API (GET/POST/PUT /users/me/goals: ADR-014 active 唯一, 1004 冲突)
-  - 4.7 user-web 登录页 (/login /register: auth store + api 拦截器 token/401 + 路由守卫)
-  - 4.8 user-web 我的页 (/profile: 资料/密码/目标 三 Tab, build 通过)
-  ⚠ 实际运行验收需本地 PostgreSQL（沙箱无 PG, 后端 23 单测全绿; 前端 type-check+build 通过）
-[待办]   阶段 5：管理后台（admin 模块 + admin-web）
+  - 4.1-4.6 auth/users 8 接口 + 23 单测全绿
+  - 4.7-4.8 user-web 登录/注册/我的页 (type-check + build 通过)
+[完成] === Phase 5 管理后台 ===
+  - 5.1-5.5 admin 后端 API (dashboard/users/topics/tags/questions CRUD + 启停)
+         后端单测 test_admin_* 全绿；admin.md 契约对齐
+  - 5.6 admin-web 骨架 (路由 + AdminLayout + LoginView + auth store; build 通过)
+  - 5.7 admin-web 各页 (Dashboard/Users/Topics/Tags/Questions 全部完成; type-check + build 通过)
+[待办-用户] === 本地 Docker 验证 ===
+  ⚠ 沙箱不做预览/运行测试（无 Docker / 无 PG）。用户将在本地 docker compose up 后统一验证：
+     - 1.6 四服务全绿 + /health 200
+     - 2.x alembic upgrade head 建 15 表 + 触发器 + 种子
+     - 4.x auth/users 全链路
+     - 5.x admin 后台登录 + dashboard/users/topics/tags/questions CRUD + 启停
+  沙箱侧只保证：单测全绿、type-check + build 通过、ruff 通过、迁移 offline SQL 语法正确。
+[待办]   Phase 6+ 题库(用户端)/练习/录音/学习数据/首页/测试/部署
 ```
 
 ---
 
 ## 3. 当前任务
 
-- **Phase 4 用户系统已全部完成**（任务 4.1–4.8）。
-- **下一步**：阶段 5 管理后台（admin 模块 + admin-web）。
-- **当前状态**：用户系统全链路打通（注册/登录/退出/资料/改密/目标 + user-web 登录注册/我的页），JWT 鉴权全链路通。后端 23 单测全绿，前端 type-check + build 通过。按 development-plan.md §7 执行任务 5.1–5.6。
+- **Phase 5 管理后台已全部完成**（5.1–5.7）：后端 admin API + admin-web 全部页面。
+- **下一步**：阶段 6 题库系统（用户端）—— questions 模块 + user-web 题库页。
+- **沙箱不做预览/运行验证**（无 Docker / 无 PG）；用户将在本地 docker compose up 后统一验收。
+- 沙箱侧仅保证：单测全绿、`type-check + build` 通过、`ruff` 通过。
 
 ### 3.1 当前任务边界（阶段 5 生效）
 
@@ -130,6 +136,19 @@
 | user-web 登录页 | `apps/user-web/src/views/{Login,Register}View.vue` | ✅ | auth store(login/register/logout/fetchProfile) + api 拦截器(token/401) + 路由守卫；type-check+build 通过 |
 | user-web 我的页 | `apps/user-web/src/views/ProfileView.vue` | ✅ | 资料/密码/目标 三 Tab；全量替换/改密/目标 CRUD 状态机；type-check+build 通过 |
 | 共享类型 | `packages/types/src/index.ts` | ✅ | +用户域实体类型（UserPublic/UserProfilePublic/AuthData/UserGoal/GoalsResponse）+ 请求 DTO |
+
+**代码模块（Phase 5 管理后台）**：
+
+| 模块 | 路径 | 状态 | 验收 |
+| --- | --- | --- | --- |
+| admin 后端模块 | `backend/app/modules/admin/{router,service,repository,schemas}.py` | ✅ | dashboard/users/topics/tags/questions CRUD + 启停；8001 Other 保护 / 8002 引用检查 / 8006 防自锁 / 8007 防管理员互操作；test_admin_* 单测全绿 |
+| admin-web 骨架 | `apps/admin-web/src/{router,layouts/AdminLayout,stores/auth,views/LoginView}.vue` | ✅ | 路由守卫 + AdminLayout 侧栏 + auth store(login 校验 admin 角色) + api 拦截器；build 通过 |
+| admin-web Dashboard | `apps/admin-web/src/views/DashboardView.vue` | ✅ | GET /admin/dashboard 统计卡片（用户/题目/练习/分类） |
+| admin-web 用户管理 | `apps/admin-web/src/views/UsersView.vue` | ✅ | 用户列表(keyword/status/role 筛选+分页) + 启用/禁用；前端拦截自锁/管理员互操作 |
+| admin-web 主题管理 | `apps/admin-web/src/views/TopicsView.vue` | ✅ | 主题 CRUD + 软删；Other 主题(is_system)禁用编辑 name/slug + 禁用删除 |
+| admin-web 标签管理 | `apps/admin-web/src/views/TagsView.vue` | ✅ | 标签 CRUD + 软删；8002 引用检查提示 |
+| admin-web 题目管理 | `apps/admin-web/src/views/QuestionsView.vue` | ✅ | 题目列表(6 维筛选+分页) + 创建/编辑(全字段+tag 多选) + 状态切换(draft/published/disabled 下拉) |
+| admin 域类型 | `apps/admin-web/src/types/admin.ts` | ✅ | admin.md §8 DTO 对齐（DashboardData/AdminUserListItem/AdminTopicItem/AdminTagItem/AdminQuestionListItem/Detail + 请求 DTO） |
 
 **后端关键文件（Phase 3-4 已实现）**：
 - `backend/app/main.py` — create_app() 工厂 + /health + auth/users 路由注册
@@ -389,3 +408,4 @@ admin:       users / topics / tags / questions (CRUD + 启停)
 | 2026-07-23 | **Phase 2 数据库阶段全部完成** | Alembic + 15 表迁移(001-015) + 触发器(016) + 种子(017) + seed_admin.py；offline SQL 验证通过；进入 Phase 3 |
 | 2026-07-23 | **Phase 3 后端基础架构全部完成** | security.py(JWT+bcrypt 原生 API) + dependencies.py(get_current_user/require_admin) + exceptions.py(4 异常处理器) + 模块骨架；GitHub 仓库初始化 + 推送；进入 Phase 4 |
 | 2026-07-23 | **Phase 4 用户系统全部完成** | auth(register/login/logout) + users(me/password/goals) 8 接口 + 23 单测全绿；user-web 登录/注册/我的页 + auth store + api 拦截器 + 路由守卫；type-check+build 通过；进入 Phase 5 |
+| 2026-07-23 | **Phase 5 管理后台全部完成** | admin 后端(dashboard/users/topics/tags/questions CRUD + 启停) + test_admin_* 单测全绿；admin-web 骨架 + Dashboard/Users/Topics/Tags/Questions 5 页；沙箱放弃预览测试（无 Docker/PG），本地 docker 验证待办入计划；type-check+build 通过；进入 Phase 6 |

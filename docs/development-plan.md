@@ -133,6 +133,13 @@
 
 **阶段 5 验收**：管理员可登录后台管理全部内容，Other 主题/题目物理删除受保护。
 
+> **本地 Docker 验证待办（用户自行执行，沙箱不做预览）**：阶段 1.6 / 阶段 2 / 阶段 4 / 阶段 5 涉及实际运行（DB / API / 前端）的验收，沙箱无 Docker 与 PostgreSQL，待用户在本地 `docker compose up` 后统一验证。验收点：
+> - 1.6 四服务全绿、前端可访问、后端 `/health` 200；
+> - 2.1 `alembic upgrade head` 建出 15 表 + 索引 + 触发器 + 种子；
+> - 4.x auth/users 全链路（注册/登录/资料/目标）；
+> - 5.x admin 后台登录 + dashboard/users/topics/tags/questions CRUD + 启停。
+> 沙箱侧只保证：单测全绿、type-check + build 通过、ruff 通过、迁移 offline SQL 语法正确。
+
 ---
 
 ## 8. 阶段 6：题库系统（用户端）
