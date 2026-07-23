@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers, success
+from app.modules import auth_router, users_router
 
 
 @asynccontextmanager
@@ -43,6 +44,10 @@ def create_app() -> FastAPI:
     )
 
     register_exception_handlers(app)
+
+    # 业务路由统一挂载到 /api/v1（common.md §1）
+    app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(users_router, prefix="/api/v1")
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, Any]:
