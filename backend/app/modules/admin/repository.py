@@ -7,15 +7,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.question import (
     SpeakingQuestion,
     SpeakingTopic,
     Tag,
 )
-from app.models.user import User
+from app.models.user import Role, User, UserProfile
 
 # ---------------------------------------------------------------------------
 # Dashboard 统计（admin.md §2.4）
@@ -94,3 +95,72 @@ async def count_practice_stats(db: AsyncSession) -> dict[str, int]:
         "total_recordings": 0,
         "total_duration_seconds": 0,
     }
+
+
+# ---------------------------------------------------------------------------
+# 用户管理（admin.md §3）
+# ---------------------------------------------------------------------------
+
+
+async def list_users(
+    db: AsyncSession,
+    *,
+    page: int,
+    page_size: int,
+    keyword: str | None = None,
+    status: str | None = None,
+    role: str | None = None,
+) -> tuple[list[User], int]:
+    """管理员用户列表（admin.md §3.1）。
+
+    - keyword: ILIKE 匹配 email 或 profile.nickname（联合 profile 表）
+    - status: active/disabled
+    - role: user/admin（需 join roles 表）
+    - 仅含未软删用户
+    返回 (items, total)。
+    """
+    stmt = (
+        select(User)
+        .options(selectinload(User.role), selectinload(User.profile))
+        .where(User.deleted_at.is_(None))
+    )
+    if keyword:
+        kw = f"%{keyword}%"
+        # email 直接匹配；nickname 需 join profiles
+        stmt = stmt.outerjoin(UserProfile, UserProfile.user_id == User.id).where(
+            or_(User.email.ilike(kw), UserProfile.nickname.ilike(kw))
+        )
+    if status:
+        stmt = stmt.where(User.status == status)
+    if role:
+        stmt = stmt.join(Role, Role.id == User.role_id).where(Role.name == role)
+
+    # 总数（用相同 where 但 count）
+    count_stmt = select(func.count()).select_from(User).where(User.deleted_at.is_(None))
+    if keyword:
+        kw = f"%{keyword}%"
+        count_stmt = count_stmt.outerjoin(UserProfile, UserProfile.user_id == User.id).where(
+            or_(User.email.ilike(kw), UserProfile.nickname.ilike(kw))
+        )
+    if status:
+        count_stmt = count_stmt.where(User.status == status)
+    if role:
+        count_stmt = count_stmt.join(Role, Role.id == User.role_id).where(Role.name == role)
+    total = int((await db.execute(count_stmt)).scalar_one())
+
+    # 分页
+    stmt = stmt.order_by(User.created_at.desc()).limit(page_size).offset((page - 1) * page_size)
+    result = await db.execute(stmt)
+    items = list(result.scalars().unique().all())
+    return items, total
+
+
+async def get_user_by_id_admin(db: AsyncSession, user_id: int) -> User | None:
+    """按 id 查用户（管理员视角，含软删用户，加载 role/profile）。"""
+    stmt = (
+        select(User)
+        .options(selectinload(User.role), selectinload(User.profile))
+        .where(User.id == user_id)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
