@@ -97,3 +97,53 @@ export type AttemptStatus = 'pending' | 'recording' | 'submitted' | 'skipped';
 
 /** 录音状态。 */
 export type RecordingStatus = 'uploading' | 'uploaded' | 'failed';
+
+// ---------------------------------------------------------------------------
+// 用户域实体视图（auth.md §7.2 / users.md §2.2，Phase 4 补充）
+// ---------------------------------------------------------------------------
+
+/** 用户公开资料（UserPublic.profile，auth.md §7.2）。 */
+export interface UserProfilePublic {
+  nickname: string | null;
+  timezone: string;
+  avatar_url: string | null;
+}
+
+/**
+ * 用户公开信息（auth.md §7.2 / users.md §2.2）。
+ * id 序列化为字符串 (ADR-005)，created_at 为 users.md §2.2 扩展字段。
+ */
+export interface UserPublic {
+  id: ID;
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+  profile: UserProfilePublic;
+  created_at: ISODateTime;
+}
+
+/** 认证响应 data（auth.md §2.2，注册/登录共用）。 */
+export interface AuthData {
+  user: UserPublic;
+  access_token: string;
+  token_type: 'bearer';
+  expires_in: number;
+}
+
+// ---------------------------------------------------------------------------
+// 用户域请求 DTO（auth.md §7.1 / users.md）
+// ---------------------------------------------------------------------------
+
+/** 注册请求（auth.md §7.1）。 */
+export interface RegisterRequest {
+  email: string;
+  password: string;
+  nickname?: string;
+  timezone?: string;
+}
+
+/** 登录请求（auth.md §7.1）。 */
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
