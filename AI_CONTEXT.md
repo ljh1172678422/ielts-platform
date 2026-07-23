@@ -17,7 +17,7 @@
 
 ## 2. 当前阶段
 
-**Phase 2 — 数据库阶段（已完成）** → 进入 **Phase 3 — 后端基础架构**
+**Phase 4 — 用户系统（已完成）** → 进入 **Phase 5 — 管理后台**
 
 ```text
 [完成] === Phase 0 文档设计阶段全部完成 ===
@@ -32,43 +32,53 @@
   - 1.7 Git 分支策略 (README.md 记录 main/develop+feature/* + Conventional Commits)
 [完成] === Phase 2 数据库阶段全部完成 ===
   - 2.1 Alembic 初始化 (migrations/env.py 注入 sync_url + alembic.ini file_template 日期前缀)
-  - 2.2-2.5 15 表迁移 (拓扑序 001→015, 1:1 对齐 database-design v0.4 DDL:
-         字段类型/NOT NULL/DEFAULT/PK/UNIQUE/CHECK/FK ON DELETE/索引 全部对齐)
-  - 2.6 种子数据 (迁移 017: roles(user/admin) + Other 主题, ON CONFLICT 幂等;
-         scripts/seed_admin.py: bcrypt cost≥12, 生产密码强度校验, 幂等跳过)
+  - 2.2-2.5 15 表迁移 (拓扑序 001→015, 1:1 对齐 database-design v0.4 DDL)
+  - 2.6 种子数据 (迁移 017: roles(user/admin) + Other 主题, ON CONFLICT 幂等)
   - 2.7 updated_at 触发器 (迁移 016: set_updated_at() 函数 + 11 表 BEFORE UPDATE 触发器)
-  ⚠ 实际 `alembic upgrade head` 需本地 PostgreSQL（沙箱无 PG, 已用 offline --sql 验证全部 DDL/索引/触发器/种子语法正确）
-[待办]   阶段 3：后端基础架构（安全层/依赖注入/响应中间件/模块骨架）
+[完成] === Phase 3 后端基础架构全部完成 ===
+  - 3.3 安全层 (core/security.py: JWT HS256 24h + bcrypt 原生 API cost=12, 弃 passlib)
+  - 3.5 依赖注入 (core/dependencies.py: get_current_user/require_admin; models/user.py 4 表 ORM)
+  - 3.6 响应中间件 (core/exceptions.py: 4 异常处理器全链路信封化 AppError/422/HTTPException/500)
+  - 3.7 模块骨架 (modules/{auth,users}/{router,service,repository,schemas}.py)
+[完成] === Phase 4 用户系统全部完成 ===
+  - 4.1 注册 API (POST /auth/register: 事务建 user+profile+log + 签 JWT, 3001 邮箱冲突)
+  - 4.2 登录 API (POST /auth/login: 3002 防枚举, 2004 禁用, 更新 last_login_at)
+  - 4.3 退出 API (POST /auth/logout: 无状态 ADR-027, 仅写日志)
+  - 4.4 用户资料 (GET/PUT /users/me: timezone IANA 校验, 全量替换)
+  - 4.5 改密 API (PUT /users/me/password: 3003 旧密码错, new≠old)
+  - 4.6 目标 API (GET/POST/PUT /users/me/goals: ADR-014 active 唯一, 1004 冲突)
+  - 4.7 user-web 登录页 (/login /register: auth store + api 拦截器 token/401 + 路由守卫)
+  - 4.8 user-web 我的页 (/profile: 资料/密码/目标 三 Tab, build 通过)
+  ⚠ 实际运行验收需本地 PostgreSQL（沙箱无 PG, 后端 23 单测全绿; 前端 type-check+build 通过）
+[待办]   阶段 5：管理后台（admin 模块 + admin-web）
 ```
 
 ---
 
 ## 3. 当前任务
 
-- **Phase 2 数据库阶段已全部完成**（任务 2.1–2.7）。
-- **下一步**：阶段 3 后端基础架构（安全层 / 依赖注入 / 响应中间件 / 模块骨架）。
-- **当前状态**：DB schema 已锁定（15 表 + 索引 + 触发器 + 种子迁移就绪），按 development-plan.md §5 执行任务 3.1–3.7。其中 3.1/3.2/3.4 在 Phase 1 已建骨架，Phase 3 重点为 3.3 安全层（security.py JWT/bcrypt）、3.5 依赖注入（get_current_user/require_admin）、3.6 响应中间件、3.7 模块骨架。
+- **Phase 4 用户系统已全部完成**（任务 4.1–4.8）。
+- **下一步**：阶段 5 管理后台（admin 模块 + admin-web）。
+- **当前状态**：用户系统全链路打通（注册/登录/退出/资料/改密/目标 + user-web 登录注册/我的页），JWT 鉴权全链路通。后端 23 单测全绿，前端 type-check + build 通过。按 development-plan.md §7 执行任务 5.1–5.6。
 
-### 3.1 当前任务边界（阶段 3 生效）
+### 3.1 当前任务边界（阶段 5 生效）
 
-**阶段 3 允许：**
-- 按 development-plan.md §5 顺序执行任务 3.1–3.7。
-- 实现 `app/core/security.py`：JWT HS256 签发/校验（auth.md §5，24h，无 refresh）+ bcrypt 哈希/校验（cost≥12，common.md §6）。
-- 实现 `app/core/dependencies.py`：`get_current_user` / `require_admin` 依赖注入（解析 Bearer token → 查 users → 校验 role/status）。
-- 实现 `app/core/response.py`（或中间件）：统一响应信封包装（common.md §2，success code=0 data 恒在；error data=null details 仅非空时出现）。
-- 建立 `app/modules/{auth,users,questions,practice,learning,home,admin}/` 骨架（router 占位，system-architecture §3 分层）。
+**阶段 5 允许：**
+- 按 development-plan.md §7 顺序执行任务 5.1–5.6。
+- 实现 `app/modules/admin/`：Dashboard 统计、用户管理、主题/标签/题目 CRUD（admin.md §2-§6）。
+- 实现 admin-web：路由 + 布局 + 登录 + 各管理页（任务 5.6）。
+- 复用 Phase 3 安全层 / 依赖注入（require_admin）/ 响应信封。
 - 一次只执行一个任务，完成即 commit + 更新 AI_CONTEXT。
 
-**禁止（阶段 3 仍生效）：**
+**禁止（阶段 5 仍生效）：**
 - ❌ 修改已锁定文档（PROJECT_SPEC / database-design / system-architecture / 全部 API 文档 / user-flow / development-plan）。
 - ❌ 改变 DB schema（阶段 2 已锁定 15 表 + 约束 + 索引；如需变更先走修改规则）。
 - ❌ 偏离 system-architecture §3 分层（router→service→repository，session 注入 repository）。
-- ❌ 实现具体业务逻辑（注册/登录/题库 CRUD 等属阶段 4+，本阶段仅骨架 + 基础设施）。
 - ❌ 改变统一响应结构 `{code,message,data,details?}`。
 - ❌ 改变状态机或核心事实链。
 - ❌ 一次性生成整个项目（PROJECT_SPEC §开发原则）。
 
-> 阶段 2 → 阶段 3 转换已由用户连续执行模式授权覆盖，无需再次确认。
+> 阶段 4 → 阶段 5 转换已由用户连续执行模式授权覆盖，无需再次确认。
 
 ---
 
@@ -101,18 +111,39 @@
 | config 补全 | `backend/app/core/config.py` | ✅ | +seed_admin_nickname 字段（对齐 §9.3）+ `.env.example` 同步 |
 | 全链路验证 | — | ✅ | `alembic upgrade head --sql` 生成全部 DDL/索引/触发器/种子 SQL 语法正确；`pytest` 1 passed；`ruff check` 0 错误 |
 
-**后端骨架关键文件**：
-- `backend/app/main.py` — create_app() 工厂 + /health
-- `backend/app/core/config.py` — pydantic-settings 配置
-- `backend/app/core/database.py` — async engine + session factory
-- `backend/app/core/exceptions.py` — 统一信封 + AppError + 422 改写（对齐 common.md v0.2）
-- `backend/app/core/security.py` — 占位（Phase 4 实现 JWT/bcrypt）
-- `backend/tests/test_health.py` — health 端点测试
+**代码模块（Phase 3 后端基础架构）**：
+
+| 模块 | 路径 | 状态 | 验收 |
+| --- | --- | --- | --- |
+| 安全层 | `backend/app/core/security.py` | ✅ | JWT HS256 24h + bcrypt 原生 API cost=12（弃 passlib，1.7.4 与 bcrypt 4.x 兼容 bug） |
+| 依赖注入 | `backend/app/core/dependencies.py` | ✅ | get_current_user / require_admin（Bearer→解码→查 user→校验 status/role） |
+| 响应中间件 | `backend/app/core/exceptions.py` | ✅ | 4 异常处理器全链路信封化（AppError/422/HTTPException/500），冒烟验证 404→1004 等 |
+| 用户域 ORM | `backend/app/models/{user,activity}.py` | ✅ | 4+1 表 SQLAlchemy 2.x Mapped 风格（Role/User/UserProfile/UserGoal + UserActivityLog） |
+| 模块骨架 | `backend/app/modules/{auth,users}/` | ✅ | router/service/repository/schemas 分层，main.py 注册路由 |
+
+**代码模块（Phase 4 用户系统）**：
+
+| 模块 | 路径 | 状态 | 验收 |
+| --- | --- | --- | --- |
+| auth 模块 | `backend/app/modules/auth/{router,service,repository,schemas}.py` | ✅ | register/login/logout 3 接口；3001 邮箱冲突 / 3002 防枚举 / 2004 禁用；4 单测文件 10 tests |
+| users 模块 | `backend/app/modules/users/{router,service,repository,schemas}.py` | ✅ | me(GET/PUT) / me/password / me/goals(GET/POST/PUT)；timezone IANA / 3003 旧密码错 / ADR-014 active 唯一；2 单测文件 12 tests |
+| user-web 登录页 | `apps/user-web/src/views/{Login,Register}View.vue` | ✅ | auth store(login/register/logout/fetchProfile) + api 拦截器(token/401) + 路由守卫；type-check+build 通过 |
+| user-web 我的页 | `apps/user-web/src/views/ProfileView.vue` | ✅ | 资料/密码/目标 三 Tab；全量替换/改密/目标 CRUD 状态机；type-check+build 通过 |
+| 共享类型 | `packages/types/src/index.ts` | ✅ | +用户域实体类型（UserPublic/UserProfilePublic/AuthData/UserGoal/GoalsResponse）+ 请求 DTO |
+
+**后端关键文件（Phase 3-4 已实现）**：
+- `backend/app/main.py` — create_app() 工厂 + /health + auth/users 路由注册
+- `backend/app/core/config.py` — pydantic-settings 配置（jwt_secret/algorithm/expires_seconds 等）
+- `backend/app/core/database.py` — async engine + session factory + Base
+- `backend/app/core/security.py` — JWT HS256 签发/校验 + bcrypt 哈希/校验（cost=12）
+- `backend/app/core/dependencies.py` — get_current_user / require_admin
+- `backend/app/core/exceptions.py` — 统一信封 + AppError + 4 异常处理器（对齐 common.md v0.2）
+- `backend/tests/` — 6 测试文件 23 tests 全绿（health + auth register/login/logout + users service/goals）
 
 **前端共享包关键约定（对齐 common.md v0.2）**：
-- `@ielts/types`：ResponseEnvelope / ErrorEnvelope / PaginatedData / ID(string) / 各状态枚举
+- `@ielts/types`：协议层（ResponseEnvelope/ErrorEnvelope/PaginatedData/ID/枚举）+ 用户域实体（UserPublic/AuthData/UserGoal 等）+ 请求 DTO
 - `@ielts/api-client`：createApiClient() 工厂 + 请求拦截器(token) + 响应拦截器(信封解包) + ApiClientError
-- user-web 已迁移复用 `@ielts/types`（消除本地 ApiResponse 重复定义）
+- user-web 复用 `@ielts/types`（消除本地 ApiResponse 重复定义）+ 自建 `api/index.ts`（ApiError + token 注入 + 401 处理）
 
 **文档模块**：
 
@@ -356,3 +387,5 @@ admin:       users / topics / tags / questions (CRUD + 启停)
 | 2026-07-23 | **Phase 0 文档设计阶段全部完成** | 13 份文档锁定，待授权进入 Phase 1 |
 | 2026-07-23 | **Phase 1 开发环境阶段全部完成** | Monorepo + 2 apps + 4 packages + backend 骨架 + Docker Compose + README；连续执行模式授权 |
 | 2026-07-23 | **Phase 2 数据库阶段全部完成** | Alembic + 15 表迁移(001-015) + 触发器(016) + 种子(017) + seed_admin.py；offline SQL 验证通过；进入 Phase 3 |
+| 2026-07-23 | **Phase 3 后端基础架构全部完成** | security.py(JWT+bcrypt 原生 API) + dependencies.py(get_current_user/require_admin) + exceptions.py(4 异常处理器) + 模块骨架；GitHub 仓库初始化 + 推送；进入 Phase 4 |
+| 2026-07-23 | **Phase 4 用户系统全部完成** | auth(register/login/logout) + users(me/password/goals) 8 接口 + 23 单测全绿；user-web 登录/注册/我的页 + auth store + api 拦截器 + 路由守卫；type-check+build 通过；进入 Phase 5 |
