@@ -5,16 +5,20 @@
 - 成功 code=0
 - 错误时 data=null
 - FastAPI 默认 422 改写为 common.md 格式
+- HTTPException / 未捕获异常 兜底为统一信封（9001/9000）
 """
-
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = logging.getLogger(__name__)
 
 
 class ResponseEnvelope(BaseModel):
@@ -61,8 +65,28 @@ def _error_content(
     return content
 
 
+# Starlette HTTPException 状态码 → common.md 错误码映射
+_HTTP_STATUS_TO_CODE: dict[int, tuple[int, str]] = {
+    400: (1002, "请求参数错误"),
+    401: (2001, "未登录"),
+    403: (2003, "无权限"),
+    404: (1004, "资源不存在"),
+    405: (1005, "方法不允许"),
+    409: (1006, "资源冲突"),
+    413: (1007, "请求体过大"),
+    429: (9002, "请求过于频繁"),
+}
+
+
 def register_exception_handlers(app: FastAPI) -> None:
-    """注册统一异常处理器到 FastAPI app。"""
+    """注册统一异常处理器到 FastAPI app。
+
+    处理顺序（FastAPI 按异常类型匹配，子类优先）：
+    1. AppError → 业务自定义 code/http_status
+    2. RequestValidationError → 1001/422（Pydantic 校验失败）
+    3. StarletteHTTPException → 状态码映射到 common.md 错误码
+    4. Exception → 9000/500（兜底，记录日志）
+    """
 
     @app.exception_handler(AppError)
     async def _handle_app_error(_: Request, exc: AppError) -> JSONResponse:
@@ -79,4 +103,33 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=422,
             content=_error_content(1001, "参数校验失败", exc.errors()),
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _handle_http_exception(
+        _: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
+        code, msg = _HTTP_STATUS_TO_CODE.get(
+            exc.status_code, (9001, f"HTTP {exc.status_code}")
+        )
+        # 优先用异常自带 detail 作为 message（若非默认占位）
+        message = msg
+        if exc.detail and exc.detail != f"{exc.status_code}: {msg}":
+            message = str(exc.detail)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_error_content(code, message),
+        )
+
+    @app.exception_handler(Exception)
+    async def _handle_unexpected_error(
+        req: Request, exc: Exception
+    ) -> JSONResponse:
+        # common.md §3.2: 9000 系统内部错误 → 500
+        logger.exception(
+            "Unhandled exception on %s %s", req.method, req.url.path
+        )
+        return JSONResponse(
+            status_code=500,
+            content=_error_content(9000, "系统内部错误"),
         )
