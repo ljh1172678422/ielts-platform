@@ -13,14 +13,11 @@ from __future__ import annotations
 
 import sys
 
-from passlib.context import CryptContext
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-
-# bcrypt cost ≥ 12（common.md §6 / auth.md §5）
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
+from app.core.security import hash_password
 
 MIN_PASSWORD_LENGTH = 12
 
@@ -63,7 +60,7 @@ def main() -> None:
                 print(f"[seed_admin] 管理员已存在，跳过: {settings.seed_admin_email}")
                 return
 
-            password_hash = pwd_context.hash(settings.seed_admin_password)
+            password_hash = hash_password(settings.seed_admin_password)
 
             user_id = session.execute(
                 text(

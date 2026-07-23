@@ -49,7 +49,8 @@ class Settings(BaseSettings):
     storage_local_path: str = "./storage"
 
     # Admin seed (Phase 2 seed_admin script, database-design §9.3)
-    seed_admin_email: str = "admin@ielts.local"
+    # 用 .dev 域名：.local 是 ICANN 保留域名，会被 EmailStr 拒绝（pydantic email-validator）
+    seed_admin_email: str = "admin@ielts.dev"
     seed_admin_password: str = "change-me"
     seed_admin_nickname: str = "Admin"
 

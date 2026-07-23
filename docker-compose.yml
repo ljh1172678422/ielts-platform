@@ -2,8 +2,11 @@
 # 对齐 development-plan §3 任务 1.6：四服务（postgres + backend + user-web + admin-web）
 # 生产拓扑（统一 nginx 入口）见 system-architecture §1.2，Phase 12 部署阶段实现。
 #
-# 启动：docker compose up -d
+# 启动：docker compose up -d --build
 # 验收：http://localhost:5173 (user-web) / http://localhost:5174 (admin-web) / http://localhost:8000/health
+#
+# db-init 为一次性服务：自动跑 alembic upgrade head + seed_admin，成功后退出。
+# backend 依赖 db-init 完成后才启动，确保表结构就绪。
 services:
   postgres:
     image: postgres:16-alpine
@@ -22,6 +25,27 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+
+  # 一次性服务：自动迁移 + 种子管理员（跑完即退出）
+  # 复用 backend 镜像（含 alembic + scripts），command 覆盖为迁移+seed
+  db-init:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ielts-db-init
+    command: ["sh", "-c", "uv run alembic upgrade head && uv run python scripts/seed_admin.py"]
+    environment:
+      APP_ENV: development
+      APP_DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://ielts:ielts@postgres:5432/ielts_speaking
+      DATABASE_SYNC_URL: postgresql+psycopg2://ielts:ielts@postgres:5432/ielts_speaking
+      SEED_ADMIN_EMAIL: admin@ielts.dev
+      SEED_ADMIN_PASSWORD: Admin@2026
+      SEED_ADMIN_NICKNAME: Admin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   backend:
     build:
@@ -44,6 +68,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
     volumes:
       - backend-storage:/app/storage
     restart: unless-stopped
@@ -56,7 +82,8 @@ services:
     ports:
       - "5173:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_started
     restart: unless-stopped
 
   admin-web:
@@ -67,7 +94,8 @@ services:
     ports:
       - "5174:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_started
     restart: unless-stopped
 
 volumes:

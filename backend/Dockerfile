@@ -11,8 +11,11 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
-# 应用代码
+# 应用代码 + 迁移 + 脚本（db-init 服务需要 alembic + seed_admin）
 COPY app ./app
+COPY alembic.ini ./
+COPY migrations ./migrations
+COPY scripts ./scripts
 
 ENV APP_ENV=production \
     PYTHONUNBUFFERED=1
