@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import get_db
 from app.core.exceptions import success
 from app.modules.auth import service
-from app.modules.auth.schemas import RegisterRequest
+from app.modules.auth.schemas import LoginRequest, RegisterRequest
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -25,4 +25,20 @@ async def register(
     """
     ip = request.client.host if request.client else None
     data = await service.register(db, req, ip_address=ip)
+    return success(data)
+
+
+@router.post("/login", response_model=None)
+async def login(
+    req: LoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """登录 (auth.md §3)。
+
+    成功 HTTP 200，返回 {code:0, message:"ok", data: AuthData}。
+    错误：3002 邮箱或密码错误（防枚举）/ 2004 账号已禁用。
+    """
+    ip = request.client.host if request.client else None
+    data = await service.login(db, req, ip_address=ip)
     return success(data)

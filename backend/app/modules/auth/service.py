@@ -12,12 +12,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import AppError
-from app.core.security import create_access_token, hash_password
+from app.core.security import create_access_token, hash_password, verify_password
 from app.models.activity import UserActivityLog
 from app.models.user import Role, User, UserProfile
-from app.modules.auth.schemas import RegisterRequest
+from app.modules.auth.schemas import LoginRequest, RegisterRequest
 from app.modules.users.schemas import UserProfilePublic, UserPublic
 
 
@@ -137,3 +138,70 @@ async def _get_user_by_email_active(db: AsyncSession, email: str) -> User | None
     stmt = select(User).where(User.email == email, User.deleted_at.is_(None))
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
+
+
+async def login(
+    db: AsyncSession, req: LoginRequest, *, ip_address: str | None = None
+) -> dict:
+    """登录 (auth.md §3.4)。
+
+    防枚举：邮箱不存在与密码错误统一返回 3002/401。
+    返回 AuthData dict（结构同 register）。
+    """
+    # 1. 按 email 查未软删账号 + 加载 role/profile 关系
+    stmt = (
+        select(User)
+        .options(selectinload(User.role), selectinload(User.profile))
+        .where(User.email == req.email, User.deleted_at.is_(None))
+    )
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    # 2. 用户不存在 → 3002（防枚举，不返回 1002）
+    if user is None:
+        raise AppError(
+            code=3002,
+            message="邮箱或密码错误",
+            http_status=401,
+        )
+
+    # 3. bcrypt 校验 → 失败 → 3002（同上，防枚举）
+    if not verify_password(req.password, user.password_hash):
+        raise AppError(
+            code=3002,
+            message="邮箱或密码错误",
+            http_status=401,
+        )
+
+    # 4. status='disabled' → 2004/403（auth.md §3.3）
+    if user.status == "disabled":
+        raise AppError(
+            code=2004,
+            message="账号已禁用",
+            http_status=403,
+        )
+
+    # 5. 事务内更新 last_login_at + 写日志
+    user.last_login_at = datetime.now(UTC)
+    log = UserActivityLog(
+        user_id=user.id,
+        action="user_login",
+        entity_type="user",
+        entity_id=user.id,
+        ip_address=ip_address,
+    )
+    db.add(log)
+    await db.flush()
+
+    # 6. 签发 JWT
+    token, expires_in = create_access_token(
+        user_id=user.id, role=user.role.name, email=user.email
+    )
+
+    user_public = _build_user_public(user)
+    return {
+        "user": user_public.model_dump(mode="json"),
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": expires_in,
+    }
