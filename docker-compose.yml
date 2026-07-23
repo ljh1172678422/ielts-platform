@@ -1,0 +1,75 @@
+# IELTS Speaking Web App — 开发环境编排
+# 对齐 development-plan §3 任务 1.6：四服务（postgres + backend + user-web + admin-web）
+# 生产拓扑（统一 nginx 入口）见 system-architecture §1.2，Phase 12 部署阶段实现。
+#
+# 启动：docker compose up -d
+# 验收：http://localhost:5173 (user-web) / http://localhost:5174 (admin-web) / http://localhost:8000/health
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ielts-postgres
+    environment:
+      POSTGRES_USER: ielts
+      POSTGRES_PASSWORD: ielts
+      POSTGRES_DB: ielts_speaking
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ielts -d ielts_speaking"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ielts-backend
+    environment:
+      APP_ENV: development
+      APP_DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://ielts:ielts@postgres:5432/ielts_speaking
+      DATABASE_SYNC_URL: postgresql+psycopg2://ielts:ielts@postgres:5432/ielts_speaking
+      JWT_SECRET: change-me-to-a-random-32-byte-secret
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRES_SECONDS: "86400"
+      CORS_ORIGINS: '["http://localhost:5173","http://localhost:5174"]'
+      STORAGE_TYPE: local
+      STORAGE_LOCAL_PATH: /app/storage
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - backend-storage:/app/storage
+    restart: unless-stopped
+
+  user-web:
+    build:
+      context: .
+      dockerfile: apps/user-web/Dockerfile
+    container_name: ielts-user-web
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  admin-web:
+    build:
+      context: .
+      dockerfile: apps/admin-web/Dockerfile
+    container_name: ielts-admin-web
+    ports:
+      - "5174:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  backend-storage:

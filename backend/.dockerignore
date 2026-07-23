@@ -1,0 +1,9 @@
+# backend 构建上下文排除
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+storage
+tests
+*.md
+.env

@@ -1,0 +1,14 @@
+# 通用排除（适用于根上下文构建：user-web / admin-web）
+**/node_modules
+**/.venv
+**/dist
+**/.git
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/storage
+*.md
+docs/
+.gitignore
+.env
+.env.local
