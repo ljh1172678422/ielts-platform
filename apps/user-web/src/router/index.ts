@@ -29,6 +29,18 @@ const routes: RouteRecordRaw[] = [
         name: 'profile',
         component: () => import('@/views/ProfileView.vue'),
       },
+      // 题库（Phase 6.4，受保护：浏览/收藏需登录，questions.md §1.2 全接口 Bearer）
+      {
+        path: 'questions',
+        name: 'questions',
+        component: () => import('@/views/QuestionsView.vue'),
+      },
+      {
+        path: 'questions/:id',
+        name: 'question-detail',
+        component: () => import('@/views/QuestionDetailView.vue'),
+        props: true,
+      },
     ],
   },
 ]

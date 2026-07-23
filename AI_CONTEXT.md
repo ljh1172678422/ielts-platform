@@ -17,7 +17,7 @@
 
 ## 2. 当前阶段
 
-**Phase 5 — 管理后台（已完成）** → 下一步 **Phase 6 — 题库系统（用户端）**
+**Phase 6 — 题库系统（用户端）（已完成）** → 下一步 **Phase 7 — 练习系统**
 
 ```text
 [完成] === Phase 0 文档设计阶段全部完成 ===
@@ -48,43 +48,50 @@
          后端单测 test_admin_* 全绿；admin.md 契约对齐
   - 5.6 admin-web 骨架 (路由 + AdminLayout + LoginView + auth store; build 通过)
   - 5.7 admin-web 各页 (Dashboard/Users/Topics/Tags/Questions 全部完成; type-check + build 通过)
+[完成] === Phase 6 题库系统（用户端）===
+  - 6.1-6.3 questions 后端模块 (列表筛选/分页/排序 + 详情 4001/4002 分级 + 收藏 POST/DELETE 幂等)
+         新增 models/{favorite,practice}.py ORM；questions.md 契约对齐；test_questions 17 单测全绿
+  - 6.4 user-web 题库页 (QuestionsView 列表+筛选+收藏星标乐观更新+分页 / QuestionDetailView 详情+Cue Card 渲染+收藏+跳练习入口)
+         type-check + build 通过（1659 modules，两 View 独立 chunk）
 [待办-用户] === 本地 Docker 验证 ===
   ⚠ 沙箱不做预览/运行测试（无 Docker / 无 PG）。用户将在本地 docker compose up 后统一验证：
      - 1.6 四服务全绿 + /health 200
      - 2.x alembic upgrade head 建 15 表 + 触发器 + 种子
      - 4.x auth/users 全链路
      - 5.x admin 后台登录 + dashboard/users/topics/tags/questions CRUD + 启停
+     - 6.x 题库浏览/筛选/收藏/详情 4001/4002 分级
   沙箱侧只保证：单测全绿、type-check + build 通过、ruff 通过、迁移 offline SQL 语法正确。
-[待办]   Phase 6+ 题库(用户端)/练习/录音/学习数据/首页/测试/部署
+[待办]   Phase 7+ 练习/录音/学习数据/首页/测试/部署
 ```
 
 ---
 
 ## 3. 当前任务
 
-- **Phase 5 管理后台已全部完成**（5.1–5.7）：后端 admin API + admin-web 全部页面。
-- **下一步**：阶段 6 题库系统（用户端）—— questions 模块 + user-web 题库页。
+- **Phase 6 题库系统（用户端）已全部完成**（6.1–6.4）：questions 后端模块 + user-web 题库页/详情页。
+- **下一步**：阶段 7 练习系统 —— practice 模块（会话/attempt 状态机）。
 - **沙箱不做预览/运行验证**（无 Docker / 无 PG）；用户将在本地 docker compose up 后统一验收。
 - 沙箱侧仅保证：单测全绿、`type-check + build` 通过、`ruff` 通过。
 
-### 3.1 当前任务边界（阶段 5 生效）
+### 3.1 当前任务边界（阶段 7 生效）
 
-**阶段 5 允许：**
-- 按 development-plan.md §7 顺序执行任务 5.1–5.6。
-- 实现 `app/modules/admin/`：Dashboard 统计、用户管理、主题/标签/题目 CRUD（admin.md §2-§6）。
-- 实现 admin-web：路由 + 布局 + 登录 + 各管理页（任务 5.6）。
-- 复用 Phase 3 安全层 / 依赖注入（require_admin）/ 响应信封。
+**阶段 7 允许：**
+- 按 development-plan.md §9 顺序执行任务 7.1–7.6。
+- 实现 `app/modules/practice/`：会话创建/获取、attempt 创建/更新、会话完成（practice.md §2-§8）。
+- 扩展 `app/models/practice.py`：追加 PracticeSession / PracticeAttempt 完整模型（Phase 6 已建 PracticeSessionQuestion）。
+- 实现 user-web 练习页 `/practice/:id`（状态机 UI）。
+- 复用 Phase 6 questions 模块（practice.md §2 创建会话需查 published 题目）。
 - 一次只执行一个任务，完成即 commit + 更新 AI_CONTEXT。
 
-**禁止（阶段 5 仍生效）：**
+**禁止（阶段 7 仍生效）：**
 - ❌ 修改已锁定文档（PROJECT_SPEC / database-design / system-architecture / 全部 API 文档 / user-flow / development-plan）。
 - ❌ 改变 DB schema（阶段 2 已锁定 15 表 + 约束 + 索引；如需变更先走修改规则）。
 - ❌ 偏离 system-architecture §3 分层（router→service→repository，session 注入 repository）。
 - ❌ 改变统一响应结构 `{code,message,data,details?}`。
-- ❌ 改变状态机或核心事实链。
+- ❌ 改变状态机或核心事实链（ADR-015 attempt 跨表约束）。
 - ❌ 一次性生成整个项目（PROJECT_SPEC §开发原则）。
 
-> 阶段 4 → 阶段 5 转换已由用户连续执行模式授权覆盖，无需再次确认。
+> 阶段 6 → 阶段 7 转换已由用户连续执行模式授权覆盖，无需再次确认。
 
 ---
 
@@ -149,6 +156,17 @@
 | admin-web 标签管理 | `apps/admin-web/src/views/TagsView.vue` | ✅ | 标签 CRUD + 软删；8002 引用检查提示 |
 | admin-web 题目管理 | `apps/admin-web/src/views/QuestionsView.vue` | ✅ | 题目列表(6 维筛选+分页) + 创建/编辑(全字段+tag 多选) + 状态切换(draft/published/disabled 下拉) |
 | admin 域类型 | `apps/admin-web/src/types/admin.ts` | ✅ | admin.md §8 DTO 对齐（DashboardData/AdminUserListItem/AdminTopicItem/AdminTagItem/AdminQuestionListItem/Detail + 请求 DTO） |
+
+**代码模块（Phase 6 题库系统-用户端）**：
+
+| 模块 | 路径 | 状态 | 验收 |
+| --- | --- | --- | --- |
+| favorites ORM | `backend/app/models/favorite.py` | ✅ | favorites 表 ORM（uq_favorites_user_question 唯一约束支撑幂等 ON CONFLICT） |
+| practice ORM（部分） | `backend/app/models/practice.py` | ✅ | PracticeSessionQuestion 表 ORM（practice_count 统计用，Phase 7 追加 Session/Attempt） |
+| questions 后端模块 | `backend/app/modules/questions/{router,service,repository,schemas}.py` | ✅ | 4 接口：列表(筛选/分页/newest+popular排序) + 详情(4001/4002分级) + 收藏 POST/DELETE 幂等；published 可见性 ADR-010；test_questions 17 单测全绿 |
+| user-web 题库页 | `apps/user-web/src/views/QuestionsView.vue` | ✅ | Part/难度/keyword/排序/仅收藏 筛选 + 分页 + 收藏星标乐观更新；type-check+build 通过 |
+| user-web 题目详情页 | `apps/user-web/src/views/QuestionDetailView.vue` | ✅ | 完整字段 + Cue Card 按 \n/- 渲染 + 收藏 + 跳练习入口(Phase 7)；type-check+build 通过 |
+| 共享类型（题库域） | `packages/types/src/index.ts` | ✅ | +QuestionListItem/QuestionDetail/FavoriteResponse/PaginatedQuestions/QuestionListQuery/TopicRef/TagRef/QuestionSort |
 
 **后端关键文件（Phase 3-4 已实现）**：
 - `backend/app/main.py` — create_app() 工厂 + /health + auth/users 路由注册

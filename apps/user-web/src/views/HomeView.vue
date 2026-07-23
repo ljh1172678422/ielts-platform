@@ -36,6 +36,7 @@ function goRegister(): void {
           </span>
         </p>
         <div class="mt-4 flex justify-center gap-3">
+          <el-button type="primary" @click="router.push({ name: 'questions' })">题库</el-button>
           <el-button @click="router.push({ name: 'profile' })">我的</el-button>
           <el-button @click="handleLogout">退出登录</el-button>
         </div>

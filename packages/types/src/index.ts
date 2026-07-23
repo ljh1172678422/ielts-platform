@@ -209,3 +209,65 @@ export interface UpdateGoalRequest {
   weekly_goal_minutes?: number | null;
   status: GoalStatus;
 }
+
+// ---------------------------------------------------------------------------
+// 题库域（questions.md §7，Phase 6 补充）
+// ---------------------------------------------------------------------------
+
+/** 题库列表排序方式（questions.md §2.1）。 */
+export type QuestionSort = 'newest' | 'popular';
+
+/** 主题摘要（questions.md §7.1）。 */
+export interface TopicRef {
+  id: ID;
+  name: string;
+}
+
+/** 标签摘要（questions.md §7.1）。 */
+export interface TagRef {
+  id: ID;
+  name: string;
+}
+
+/** 题库列表项（questions.md §2.2，不含 content/cue_card/tags/source_*）。 */
+export interface QuestionListItem {
+  id: ID;
+  part: SpeakingPart;
+  title: string;
+  topic: TopicRef;
+  difficulty: number | null;
+  is_favorited: boolean;
+  practice_count: number;
+  created_at: ISODateTime;
+}
+
+/** 题目详情（questions.md §3.2，在列表项基础上追加完整字段）。 */
+export interface QuestionDetail extends QuestionListItem {
+  content: string;
+  cue_card: string | null;
+  tags: TagRef[];
+  source_type: QuestionSourceType;
+  source_name: string;
+}
+
+/** 收藏/取消收藏响应（questions.md §4.2/§5.2）。 */
+export interface FavoriteResponse {
+  question_id: ID;
+  is_favorited: boolean;
+}
+
+/** 题库列表分页响应（common.md §4.2 + questions.md §2.2）。 */
+export type PaginatedQuestions = PaginatedData<QuestionListItem>;
+
+/** 题库列表查询参数（questions.md §2.1）。 */
+export interface QuestionListQuery {
+  page?: number;
+  page_size?: number;
+  part?: SpeakingPart;
+  topic_id?: ID;
+  tag_id?: ID;
+  keyword?: string;
+  difficulty?: number;
+  sort?: QuestionSort;
+  is_favorited?: boolean;
+}
