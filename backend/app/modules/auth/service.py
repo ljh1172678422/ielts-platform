@@ -19,7 +19,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.models.activity import UserActivityLog
 from app.models.user import Role, User, UserProfile
 from app.modules.auth.schemas import LoginRequest, RegisterRequest
-from app.modules.users.schemas import UserProfilePublic, UserPublic
+from app.modules.users.service import build_user_public
 
 
 async def _get_role_by_name(db: AsyncSession, name: str) -> Role:
@@ -34,23 +34,6 @@ async def _get_role_by_name(db: AsyncSession, name: str) -> Role:
             details=[{"field": "role", "message": f"role '{name}' not seeded"}],
         )
     return role
-
-
-def _build_user_public(user: User) -> UserPublic:
-    """从 ORM User 构造 UserPublic（id 转 str，ADR-025）。"""
-    profile = user.profile
-    return UserPublic(
-        id=str(user.id),
-        email=user.email,
-        role=user.role.name,
-        status=user.status,
-        profile=UserProfilePublic(
-            nickname=profile.nickname if profile else None,
-            timezone=profile.timezone if profile else "Asia/Shanghai",
-            avatar_url=profile.avatar_url if profile else None,
-        ),
-        created_at=user.created_at,
-    )
 
 
 async def register(
@@ -123,7 +106,7 @@ async def register(
     # 6. 构造响应（profile 关系需手动 attach，因刚 flush 未刷新关系）
     user.profile = profile
     user.role = role
-    user_public = _build_user_public(user)
+    user_public = build_user_public(user)
 
     return {
         "user": user_public.model_dump(mode="json"),
@@ -198,7 +181,7 @@ async def login(
         user_id=user.id, role=user.role.name, email=user.email
     )
 
-    user_public = _build_user_public(user)
+    user_public = build_user_public(user)
     return {
         "user": user_public.model_dump(mode="json"),
         "access_token": token,
