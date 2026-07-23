@@ -20,4 +20,15 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    port: 5173,
+    host: '0.0.0.0',
+    // preview（托管 build 产物）同样需要反代 /api 到 backend，否则前端调接口 404
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
+  },
 })
