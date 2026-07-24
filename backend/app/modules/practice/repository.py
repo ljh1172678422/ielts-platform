@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -358,3 +358,200 @@ async def complete_session(
         session.duration_seconds = int(delta.total_seconds())
     await db.flush()
     return session
+
+
+# ---------------------------------------------------------------------------
+# 录音上传/下载（practice.md §6/§7，Phase 8）
+# ---------------------------------------------------------------------------
+
+
+async def get_recording_for_download(
+    db: AsyncSession, attempt_id: int
+) -> Recording | None:
+    """查 attempt 的 uploaded 录音（practice.md §7.4 step 3）。
+
+    deleted 状态不返回（6001）。MVP attempt 1:1 recording。
+    """
+    stmt = select(Recording).where(
+        Recording.attempt_id == attempt_id,
+        Recording.status == "uploaded",
+        Recording.deleted_at.is_(None),
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def insert_recording(
+    db: AsyncSession,
+    *,
+    attempt_id: int,
+    user_id: int,
+    storage_type: str,
+    storage_path: str,
+    mime_type: str,
+    file_size: int,
+) -> Recording:
+    """INSERT recordings(status='uploading')（practice.md §6.4 step 5c）。"""
+    recording = Recording(
+        attempt_id=attempt_id,
+        user_id=user_id,
+        storage_type=storage_type,
+        storage_path=storage_path,
+        mime_type=mime_type,
+        file_size=file_size,
+        status="uploading",
+    )
+    db.add(recording)
+    await db.flush()
+    return recording
+
+
+async def mark_recording_uploaded(
+    db: AsyncSession,
+    recording: Recording,
+    *,
+    duration_seconds: int,
+) -> Recording:
+    """UPDATE recordings SET status='uploaded', duration_seconds（practice.md §6.4 step 5d）。"""
+    recording.status = "uploaded"
+    recording.duration_seconds = duration_seconds
+    await db.flush()
+    return recording
+
+
+async def mark_recording_failed(
+    db: AsyncSession, recording: Recording
+) -> Recording:
+    """UPDATE recordings SET status='failed'（practice.md §6.4 元数据读取失败分支）。"""
+    recording.status = "failed"
+    await db.flush()
+    return recording
+
+
+async def submit_attempt_with_recording(
+    db: AsyncSession,
+    attempt: PracticeAttempt,
+    *,
+    duration_seconds: int,
+) -> PracticeAttempt:
+    """UPDATE attempts SET status='submitted' + submitted_at + duration（ADR-015）。
+
+    submitted 前置 recording.uploaded 已由 service 层保证（先标 recording 再标 attempt）。
+    duration_seconds = recording.duration_seconds（practice.md §6.4 step 5e）。
+    """
+    attempt.status = "submitted"
+    attempt.submitted_at = datetime.now(UTC)
+    attempt.duration_seconds = duration_seconds
+    await db.flush()
+    return attempt
+
+
+async def get_attempt_with_session_question(
+    db: AsyncSession, attempt: PracticeAttempt
+) -> tuple[PracticeAttempt, PracticeSessionQuestion]:
+    """查 attempt 所属的 session_question（study_records question_count 统计用）。"""
+    stmt = select(PracticeSessionQuestion).where(
+        PracticeSessionQuestion.id == attempt.session_question_id
+    )
+    result = await db.execute(stmt)
+    sq = result.scalar_one()
+    return attempt, sq
+
+
+# ---------------------------------------------------------------------------
+# study_records 同步更新（ADR-022，practice.md §6.4 step 5f / §8.4 step 5）
+# ---------------------------------------------------------------------------
+
+
+async def get_user_timezone(db: AsyncSession, user_id: int) -> str:
+    """查 user_profiles.timezone（ADR-018 切日，默认 Asia/Shanghai）。"""
+    from app.models.user import UserProfile  # noqa: PLC0415
+
+    stmt = select(UserProfile.timezone).where(UserProfile.user_id == user_id)
+    result = await db.execute(stmt)
+    tz = result.scalar_one_or_none()
+    return tz or "Asia/Shanghai"
+
+
+async def upsert_study_record_for_recording(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    record_date: date,
+    duration_seconds: int,
+) -> None:
+    """录音上传事务内 upsert study_records（practice.md §6.4 step 5f，ADR-022）。
+
+    增量：attempt_count += 1, recording_count += 1,
+    duration_seconds += <recording.duration>, question_count += 1。
+    practice_count 不变（会话完成时才 +1）。
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: PLC0415
+
+    from app.models.activity import StudyRecord  # noqa: PLC0415
+
+    stmt = pg_insert(StudyRecord).values(
+        user_id=user_id,
+        record_date=record_date,
+        practice_count=0,
+        question_count=1,
+        attempt_count=1,
+        duration_seconds=duration_seconds,
+        recording_count=1,
+    )
+    stmt = stmt.on_conflict_do_update(
+        constraint="uq_study_records_user_date",
+        set_={
+            "question_count": StudyRecord.question_count + 1,
+            "attempt_count": StudyRecord.attempt_count + 1,
+            "recording_count": StudyRecord.recording_count + 1,
+            "duration_seconds": StudyRecord.duration_seconds + duration_seconds,
+        },
+    )
+    await db.execute(stmt)
+    await db.flush()
+
+
+async def upsert_study_record_for_session_complete(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    record_date: date,
+) -> None:
+    """会话完成事务内 upsert study_records（practice.md §8.4 step 5，ADR-022）。
+
+    增量：practice_count += 1（完整练习计数）。其他字段不变。
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: PLC0415
+
+    from app.models.activity import StudyRecord  # noqa: PLC0415
+
+    stmt = pg_insert(StudyRecord).values(
+        user_id=user_id,
+        record_date=record_date,
+        practice_count=1,
+        question_count=0,
+        attempt_count=0,
+        duration_seconds=0,
+        recording_count=0,
+    )
+    stmt = stmt.on_conflict_do_update(
+        constraint="uq_study_records_user_date",
+        set_={
+            "practice_count": StudyRecord.practice_count + 1,
+        },
+    )
+    await db.execute(stmt)
+    await db.flush()
+
+
+def compute_record_date(now: datetime, timezone_name: str) -> date:
+    """按 user_profiles.timezone 切日（ADR-018，非 UTC 切日）。"""
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    try:
+        tz = ZoneInfo(timezone_name)
+    except (KeyError, ValueError):
+        tz = ZoneInfo("Asia/Shanghai")
+    local = now.astimezone(tz)
+    return local.date()

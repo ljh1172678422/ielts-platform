@@ -1,21 +1,29 @@
 """Practice 模块业务逻辑（system-architecture §3：service 层）。
 
-对齐 practice.md §2/§3/§4/§5/§8：
+对齐 practice.md §2/§3/§4/§5/§6/§7/§8：
 - 创建会话：mode 校验 + topic 存在(4003) + 题数不足(5004) + 随机抽题 + snapshot
 - 获取会话：5001(不存在)/5003(越权) + 续练可用
 - 创建 attempt：session_question(5007) + 所有权(5003) + 激活 session(created→in_progress) + 5002(终态)
 - 更新 attempt：submitted→1001 + 所有权(5003) + session in_progress(5002) + 状态机(5006)
-- 完成会话：ADR-015(每 sq 有 submitted/skipped) → 5006 + 终态(5002)
-
-study_records 同步（ADR-022）在 Phase 8.5 接入（录音上传 + 会话完成两处）。
+- 录音上传：5005/5003/5006/6003/6004/6002 + 事务(recording.uploaded→attempt.submitted→study_records)
+- 录音下载：5005/5003/6001 + StreamingResponse
+- 完成会话：ADR-015(每 sq 有 submitted/skipped) → 5006 + 终态(5002) + study_records.practice_count++
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audio import AudioMetadataError, read_duration_seconds
 from app.core.exceptions import AppError
+from app.core.storage import (
+    ALLOWED_MIME_TYPES,
+    MAX_FILE_SIZE,
+    AudioStorage,
+    cleanup_storage_on_failure,
+)
 from app.models.activity import UserActivityLog
 from app.models.practice import (
     PracticeAttempt,
@@ -452,9 +460,15 @@ async def complete_session(
             details=incomplete,
         )
 
-    # 事务内：UPDATE session 终态 + activity_log（§8.4 step 5）
-    # TODO(Phase 8.5): UPSERT study_records (practice_count += 1) — ADR-022
+    # 事务内：UPDATE session 终态 + study_records + activity_log（§8.4 step 5，ADR-022）
     await repo.complete_session(db, session)
+
+    # study_records.practice_count += 1（ADR-022 同步更新）
+    tz = await repo.get_user_timezone(db, current_user.id)
+    record_date = repo.compute_record_date(datetime.now(UTC), tz)
+    await repo.upsert_study_record_for_session_complete(
+        db, user_id=current_user.id, record_date=record_date
+    )
 
     log = UserActivityLog(
         user_id=current_user.id,
@@ -469,6 +483,181 @@ async def complete_session(
     attempts_map = await repo.get_attempts_for_sqs(db, [sq.id for sq in sqs])
     session_dto = _build_session(session, sqs, attempts_map)
     return _session_to_dict(session_dto)
+
+
+# ---------------------------------------------------------------------------
+# 录音上传（practice.md §6，Phase 8）
+# ---------------------------------------------------------------------------
+
+
+async def upload_recording(
+    db: AsyncSession,
+    attempt_id: int,
+    *,
+    current_user: User,
+    file_data: bytes,
+    mime_type: str,
+    file_size: int,
+    storage: AudioStorage,
+) -> dict[str, Any]:
+    """上传录音（practice.md §6.4，严格对齐 §5.1 序列图 + ADR-015）。
+
+    事务内顺序：写文件 → 读元数据 → INSERT recording(uploading)
+    → UPDATE recording(uploaded) → UPDATE attempt(submitted) → upsert study_records → log
+    任一失败全回滚（文件清理 + recording 标 failed）。
+
+    错误码：5005/5003/5006/6003/6004/6002。
+    """
+    # 1. 查 attempt → 5005（practice.md §6.4 step 1）
+    attempt = await repo.get_attempt_by_id(db, attempt_id)
+    if attempt is None:
+        raise AppError(code=5005, message="答题尝试不存在", http_status=404)
+    # 2. 所有权 → 5003（§6.4 step 2）
+    if attempt.user_id != current_user.id:
+        raise AppError(code=5003, message="无权操作该答题尝试", http_status=403)
+    # 3. status ∈ {pending, recording} → 5006（§6.4 step 3）
+    if attempt.status not in {"pending", "recording"}:
+        raise AppError(
+            code=5006,
+            message=f"当前状态 {attempt.status} 不可上传录音，请新建答题尝试",
+            http_status=400,
+        )
+    # 4. 校验文件：mime_type 白名单 → 6003；file_size ≤ 50MB → 6004（§6.4 step 4）
+    if mime_type not in ALLOWED_MIME_TYPES:
+        raise AppError(
+            code=6003,
+            message=f"不支持的音频格式：{mime_type}",
+            http_status=400,
+        )
+    if file_size > MAX_FILE_SIZE:
+        raise AppError(
+            code=6004,
+            message=f"文件过大：{file_size} 字节，超过限制 {MAX_FILE_SIZE} 字节",
+            http_status=413,
+        )
+
+    # 5. 事务内：写文件 → 读元数据 → INSERT/UPDATE recording → UPDATE attempt → study_records
+    storage_path: str | None = None
+    recording: Recording | None = None
+    try:
+        # 5a. 写文件到存储（§6.4 step 5a）
+        storage_path = storage.save(file_data, mime_type=mime_type)
+
+        # 5b. 读音频元数据 → duration_seconds（ADR-020，§6.4 step 5b）
+        # 失败 → 删除文件 + 6002
+        try:
+            duration_seconds = read_duration_seconds(file_data, mime_type=mime_type)
+        except AudioMetadataError:
+            cleanup_storage_on_failure(storage, storage_path)
+            storage_path = None
+            raise AppError(
+                code=6002,
+                message="音频元数据读取失败",
+                http_status=400,
+            ) from None
+
+        # 5c. INSERT recordings(status='uploading')（§6.4 step 5c）
+        storage_type = "s3" if storage.__class__.__name__ == "S3StorageBackend" else "local"
+        recording = await repo.insert_recording(
+            db,
+            attempt_id=attempt.id,
+            user_id=current_user.id,
+            storage_type=storage_type,
+            storage_path=storage_path,
+            mime_type=mime_type,
+            file_size=file_size,
+        )
+
+        # 5d. UPDATE recordings SET status='uploaded' + duration（§6.4 step 5d）
+        await repo.mark_recording_uploaded(
+            db, recording, duration_seconds=duration_seconds
+        )
+
+        # 5e. UPDATE attempts SET status='submitted' + duration（ADR-015，§6.4 step 5e）
+        # submitted 前置 recording.uploaded 已满足
+        await repo.submit_attempt_with_recording(
+            db, attempt, duration_seconds=duration_seconds
+        )
+
+        # 5f. UPSERT study_records（ADR-022 同步更新，§6.4 step 5f）
+        tz = await repo.get_user_timezone(db, current_user.id)
+        record_date = repo.compute_record_date(datetime.now(UTC), tz)
+        await repo.upsert_study_record_for_recording(
+            db,
+            user_id=current_user.id,
+            record_date=record_date,
+            duration_seconds=duration_seconds,
+        )
+
+        # 5g. INSERT user_activity_logs（§6.4 step 5g）
+        log = UserActivityLog(
+            user_id=current_user.id,
+            action="recording_uploaded",
+            entity_type="recording",
+            entity_id=recording.id,
+            metadata_={"duration_seconds": duration_seconds, "file_size": file_size},
+        )
+        db.add(log)
+        await db.flush()
+
+        return _attempt_to_dict(attempt, recording)
+
+    except AppError:
+        raise
+    except Exception:
+        # 事务回滚：清理已写文件 + recording 标 failed（§6.4 事务边界说明）
+        cleanup_storage_on_failure(storage, storage_path)
+        if recording is not None:
+            try:
+                await repo.mark_recording_failed(db, recording)
+            except Exception:
+                pass
+        raise AppError(
+            code=6002,
+            message="录音上传失败",
+            http_status=400,
+        ) from None
+
+
+# ---------------------------------------------------------------------------
+# 录音下载（practice.md §7，Phase 8）
+# ---------------------------------------------------------------------------
+
+
+async def download_recording(
+    db: AsyncSession,
+    attempt_id: int,
+    *,
+    current_user: User,
+    storage: AudioStorage,
+) -> tuple[Recording, bytes]:
+    """下载录音（practice.md §7.4）。
+
+    返回 (recording, file_bytes)，由 router 层构造 StreamingResponse。
+    错误码：5005/5003/6001。
+    """
+    # 1. 查 attempt → 5005（§7.4 step 1）
+    attempt = await repo.get_attempt_by_id(db, attempt_id)
+    if attempt is None:
+        raise AppError(code=5005, message="答题尝试不存在", http_status=404)
+    # 2. 所有权 → 5003（§7.4 step 2）
+    if attempt.user_id != current_user.id:
+        raise AppError(code=5003, message="无权操作该答题尝试", http_status=403)
+    # 3. 查 uploaded 录音 → 6001（§7.4 step 3）
+    recording = await repo.get_recording_for_download(db, attempt.id)
+    if recording is None:
+        raise AppError(code=6001, message="录音不存在", http_status=404)
+    # 4. 读存储文件 → bytes（§7.4 step 4）
+    try:
+        file_bytes = storage.read(recording.storage_path)
+    except OSError as exc:
+        raise AppError(
+            code=6001,
+            message="录音文件读取失败",
+            http_status=404,
+        ) from exc
+
+    return recording, file_bytes
 
 
 # ---------------------------------------------------------------------------

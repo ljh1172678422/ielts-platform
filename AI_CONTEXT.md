@@ -17,7 +17,7 @@
 
 ## 2. 当前阶段
 
-**Phase 7 — 练习系统（已完成）** → 下一步 **Phase 8 — 录音上传/下载**
+**Phase 8 — 录音上传/下载（已完成）** → 下一步 **Phase 9 — 学习数据**
 
 ```text
 [完成] === Phase 0 文档设计阶段全部完成 ===
@@ -59,6 +59,23 @@
          扩展 models/practice.py (PracticeSession/PracticeAttempt)；practice.md 契约对齐；test_practice 单测全绿
   - 7.6 user-web 练习页 (PracticeView 状态机 UI + 进度统计 + ADR-015 完成校验 + QuestionDetailView 开始练习入口创建会话跳转)
          路由 /practice/:id；type-check + build 通过（PracticeView 独立 chunk 7.80 kB）
+[完成] === Phase 8 录音上传/下载 ===
+  - 8.1 录音存储层 (core/storage.py: AudioStorage 抽象 + LocalStorageBackend 实现；
+         ALLOWED_MIME_TYPES(webm/mp4/mpeg/wav) + MAX_FILE_SIZE 50MB; cleanup_storage_on_failure)
+  - 8.2 音频元数据 (core/audio.py: read_duration_seconds 使用 mutagen 解析 webm/mp4/mpeg/wav；
+         ADR-020 后端计算 duration，拒前端传入；AudioMetadataError)
+  - 8.3 上传 API (POST /attempts/{id}/recording: 5005/5003/5006/6003/6004/6002 错误码；
+         事务写文件→读元数据→recording.uploaded→attempt.submitted→study_records 同步→activity_log；
+         失败回滚清理文件 + recording 标 failed)
+  - 8.4 下载 API (GET /attempts/{id}/recording: StreamingResponse + 5005/5003/6001 错误码)
+  - 8.5 study_records 同步 (ADR-022: 录音上传 + 会话完成事务内 upsert；按 user_profiles.timezone 切日 ADR-018)
+         扩展 models/activity.py (StudyRecord) + repository (upsert_study_record_for_recording/
+         upsert_study_record_for_session_complete/get_user_timezone/compute_record_date)
+  - 8.6 user-web 录音组件 (composables/useRecorder.ts: MediaRecorder 状态机 IDLE→REQUESTING→
+         RECORDING→STOPPING→UPLOADING→UPLOADED/ERROR；webm 优先 + mp4 兜底 + 权限/异常处理；
+         PracticeView 集成录音 UI + 乐观更新 + 录音回放/下载(audio 标签 + blob URL))
+         api/index.ts 增加 FormData 检测自动设置 multipart/form-data + boundary
+         test_practice 52 单测全绿；type-check + build 通过
 [待办-用户] === 本地 Docker 验证 ===
   ⚠ 沙箱不做预览/运行测试（无 Docker / 无 PG）。用户将在本地 docker compose up 后统一验证：
      - 1.6 四服务全绿 + /health 200
@@ -67,33 +84,33 @@
      - 5.x admin 后台登录 + dashboard/users/topics/tags/questions CRUD + 启停
      - 6.x 题库浏览/筛选/收藏/详情 4001/4002 分级
      - 7.x 练习会话全生命周期（创建/续练/答题状态机/ADR-015 完成）
+     - 8.x 录音上传/下载/回放 + study_records 同步 + duration 后端计算
   沙箱侧只保证：单测全绿、type-check + build 通过、ruff 通过、迁移 offline SQL 语法正确。
-[待办]   Phase 8+ 录音/学习数据/首页/测试/部署
+[待办]   Phase 9+ 学习数据/首页/测试/部署
 ```
 
 ---
 
 ## 3. 当前任务
 
-- **Phase 7 练习系统已全部完成**（7.1–7.6）：practice 后端模块（会话/attempt 状态机 + ADR-015）+ user-web 练习页。
-- **下一步**：阶段 8 录音上传/下载 —— recording 模块（MediaRecorder + 上传/下载 + study_records 同步）。
+- **Phase 8 录音上传/下载已全部完成**（8.1–8.6）：录音存储抽象 + 元数据读取 + 上传/下载 API + study_records 同步 + user-web MediaRecorder 状态机组件。
+- **下一步**：阶段 9 学习数据 —— learning 模块（overview / daily-weekly-monthly 趋势 / topics-parts 分布 / recompute 重算 / user-web 数据页 ECharts）。
 - **沙箱不做预览/运行验证**（无 Docker / 无 PG）；用户将在本地 docker compose up 后统一验收。
 - 沙箱侧仅保证：单测全绿、`type-check + build` 通过、`ruff` 通过。
 
-### 3.1 当前任务边界（阶段 8 生效）
+### 3.1 当前任务边界（阶段 9 生效）
 
-**阶段 8 允许：**
-- 按 development-plan.md §10 顺序执行任务 8.1–8.6。
-- 实现 recording 上传/下载 API（practice.md §6/§7，POST/GET /attempts/{id}/recording）。
-- 录音存储：开发本地 FS / 生产 MinIO（system-architecture §5.4）。
-- 后端读取录音元数据计算 duration_seconds（ADR-020）；mime_type 不转码（ADR-021）。
-- study_records 同步更新（ADR-022，录音上传/会话完成事务内 upsert）。
-- ADR-015 跨表约束：录音上传事务内 attempt→submitted（不可前端直设）。
-- 实现 user-web 录音组件（MediaRecorder 状态机 IDLE→...→UPLOADED，system-architecture §5.4）。
-- 复用 Phase 7 practice 模块（录音归属 attempt）。
+**阶段 9 允许：**
+- 按 development-plan.md §11 顺序执行任务 9.1–9.5。
+- 实现 learning 后端模块（learning.md §2-§8：overview / daily / weekly / monthly / topics / parts / history / recompute）。
+- 统计走事实表（recordings / practice_sessions / practice_attempts），study_records 仅作聚合缓存（ADR-008）。
+- 按 user_profiles.timezone 切日（ADR-018）。
+- streak 连续天数计算（learning.md §2）。
+- 重算接口仅 admin 可调（learning.md §8）。
+- user-web 数据页使用 ECharts 渲染趋势/分布图。
 - 一次只执行一个任务，完成即 commit + 更新 AI_CONTEXT。
 
-**禁止（阶段 8 仍生效）：**
+**禁止（阶段 9 仍生效）：**
 - ❌ 修改已锁定文档（PROJECT_SPEC / database-design / system-architecture / 全部 API 文档 / user-flow / development-plan）。
 - ❌ 改变 DB schema（阶段 2 已锁定 15 表 + 约束 + 索引；如需变更先走修改规则）。
 - ❌ 偏离 system-architecture §3 分层（router→service→repository，session 注入 repository）。
@@ -102,7 +119,7 @@
 - ❌ 前端直设 attempt status=submitted（只能由录音上传事务设置）。
 - ❌ 一次性生成整个项目（PROJECT_SPEC §开发原则）。
 
-> 阶段 7 → 阶段 8 转换已由用户连续执行模式授权覆盖，无需再次确认。
+> 阶段 8 → 阶段 9 转换已由用户连续执行模式授权覆盖，无需再次确认。
 
 ---
 
@@ -188,6 +205,21 @@
 | user-web 练习页 | `apps/user-web/src/views/PracticeView.vue` | ✅ | 状态机 UI（pending→recording→skipped/failed/submitted）+ 进度统计 + ADR-015 完成校验 + 续练；type-check+build 通过 |
 | 练习入口 | `apps/user-web/src/views/QuestionDetailView.vue` + `router/index.ts` | ✅ | 题目详情"开始练习"创建会话(mode=topic)+跳 /practice/:id；路由守卫受保护 |
 | 共享类型（练习域） | `packages/types/src/index.ts` | ✅ | +PracticeSession/SessionQuestion/Attempt/Recording/SessionStatus/AttemptStatus/PracticeMode/QuestionSnapshot + 请求 DTO |
+
+**代码模块（Phase 8 录音上传/下载）**：
+
+| 模块 | 路径 | 状态 | 验收 |
+| --- | --- | --- | --- |
+| 录音存储抽象 | `backend/app/core/storage.py` | ✅ | AudioStorage 抽象类 + LocalStorageBackend；ALLOWED_MIME_TYPES(webm/mp4/mpeg/wav) + MAX_FILE_SIZE 50MB；cleanup_storage_on_failure；为 MinIO 预留扩展点 |
+| 音频元数据 | `backend/app/core/audio.py` | ✅ | read_duration_seconds 使用 mutagen 解析 webm/mp4/mpeg/wav；ADR-020 后端计算 duration；AudioMetadataError 异常 |
+| StudyRecord ORM | `backend/app/models/activity.py` | ✅ | +StudyRecord 表 ORM（uq_study_records_user_date 唯一约束）；models/__init__.py 导出 |
+| practice 仓库扩展 | `backend/app/modules/practice/repository.py` | ✅ | +录音 CRUD + submit_attempt_with_recording + upsert_study_record_for_recording + upsert_study_record_for_session_complete + get_user_timezone + compute_record_date（ADR-018 timezone 切日） |
+| 录音上传/下载 API | `backend/app/modules/practice/{router,service}.py` | ✅ | POST/GET /attempts/{id}/recording；事务：写文件→读元数据→recording.uploaded→attempt.submitted→study_records 同步→activity_log；失败回滚清理；5005/5003/5006/6001/6002/6003/6004 错误码 |
+| user-web 录音组件 | `apps/user-web/src/composables/useRecorder.ts` | ✅ | MediaRecorder 状态机 IDLE→REQUESTING→RECORDING→STOPPING→UPLOADING→UPLOADED/ERROR；webm 优先 + mp4 兜底 + 权限/异常处理；自动停止兜底 |
+| user-web 练习页扩展 | `apps/user-web/src/views/PracticeView.vue` | ✅ | 集成录音 UI + 乐观更新 + 录音回放/下载（audio 标签 + blob URL）；续练场景断线重连分支 |
+| api 拦截器扩展 | `apps/user-web/src/api/index.ts` | ✅ | +FormData 检测自动设置 multipart/form-data + boundary（删除默认 Content-Type） |
+| mutagen 依赖 | `backend/pyproject.toml` | ✅ | +mutagen 用于音频元数据解析 |
+| test_practice 扩展 | `backend/tests/test_practice.py` | ✅ | 52 单测全绿（Phase 7 22 + Phase 8 录音上传/下载/study_records 同步 30） |
 
 **后端关键文件（Phase 3-4 已实现）**：
 - `backend/app/main.py` — create_app() 工厂 + /health + auth/users 路由注册
@@ -450,3 +482,4 @@ admin:       users / topics / tags / questions (CRUD + 启停)
 | 2026-07-23 | **Phase 5 管理后台全部完成** | admin 后端(dashboard/users/topics/tags/questions CRUD + 启停) + test_admin_* 单测全绿；admin-web 骨架 + Dashboard/Users/Topics/Tags/Questions 5 页；沙箱放弃预览测试（无 Docker/PG），本地 docker 验证待办入计划；type-check+build 通过；进入 Phase 6 |
 | 2026-07-23 | **Phase 6 题库系统（用户端）全部完成** | questions 后端模块(列表/详情/收藏) + favorites/practice ORM + test_questions 17 单测全绿；user-web 题库页/详情页(Cue Card 渲染+收藏+跳练习入口)；type-check+build 通过；进入 Phase 7 |
 | 2026-07-23 | **Phase 7 练习系统全部完成** | practice 后端模块(会话创建/获取/完成 + attempt 创建/更新；状态机 + ADR-015 跨表约束) + test_practice 单测全绿；扩展 models/practice.py(PracticeSession/PracticeAttempt/Recording)；user-web PracticeView 状态机 UI + 进度统计 + QuestionDetailView 开始练习入口；路由 /practice/:id；type-check+build 通过(PracticeView 独立 chunk 7.80 kB)；进入 Phase 8 |
+| 2026-07-23 | **Phase 8 录音上传/下载全部完成** | core/storage.py(AudioStorage 抽象+LocalStorageBackend) + core/audio.py(mutagen 读 duration ADR-020) + 录音上传/下载 API(POST/GET /attempts/{id}/recording，事务一致性，5005/5003/5006/6001-6004 错误码) + study_records 同步(ADR-022 + ADR-018 timezone 切日) + models/activity.py(StudyRecord)；user-web composables/useRecorder.ts(MediaRecorder 状态机 IDLE→...→UPLOADED/ERROR) + PracticeView 集成录音 UI + 回放/下载 + api FormData 自动处理；test_practice 52 单测全绿；type-check+build 通过；进入 Phase 9 |

@@ -10,13 +10,20 @@
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.audio import AudioMetadataError
 from app.core.exceptions import AppError
-from app.models.practice import PracticeAttempt, PracticeSession, PracticeSessionQuestion
+from app.core.storage import MAX_FILE_SIZE
+from app.models.practice import (
+    PracticeAttempt,
+    PracticeSession,
+    PracticeSessionQuestion,
+    Recording,
+)
 from app.models.question import SpeakingQuestion, SpeakingTopic
 from app.modules.practice import service as practice_service
 
@@ -594,7 +601,7 @@ async def test_complete_session_adr015_violation_returns_5006_with_details() -> 
 
 @pytest.mark.asyncio
 async def test_complete_session_success_returns_completed_with_duration() -> None:
-    """ADR-015 通过 → status=completed + duration_seconds + activity_log。"""
+    """ADR-015 通过 → status=completed + duration_seconds + study_records + activity_log。"""
     db = _mock_db()
     started = datetime.now(UTC)
     session = _make_session(sid=201, user_id=1, status="in_progress", started_at=started)
@@ -612,10 +619,14 @@ async def test_complete_session_success_returns_completed_with_duration() -> Non
         patch("app.modules.practice.service.repo.get_session_questions", new=AsyncMock(return_value=[sq])),
         patch("app.modules.practice.service.repo.get_attempt_status_summary", new=AsyncMock(return_value=summary)),
         patch("app.modules.practice.service.repo.complete_session", new=AsyncMock(side_effect=_complete)) as complete_mock,
+        patch("app.modules.practice.service.repo.get_user_timezone", new=AsyncMock(return_value="Asia/Shanghai")),
+        patch("app.modules.practice.service.repo.compute_record_date", return_value=date(2026, 7, 23)),
+        patch("app.modules.practice.service.repo.upsert_study_record_for_session_complete", new=AsyncMock()) as upsert_mock,
         patch("app.modules.practice.service.repo.get_attempts_for_sqs", new=AsyncMock(return_value={301: [(attempt, None)]})),
     ):
         result = await practice_service.complete_session(db, 201, current_user=MagicMock(id=1))
     complete_mock.assert_awaited_once()
+    upsert_mock.assert_awaited_once()
     assert result["status"] == "completed"
     assert result["duration_seconds"] == 100
     assert db.add.call_count == 1
@@ -670,3 +681,277 @@ def test_validate_transition_matrix(current: str, target: str, should_pass: bool
         with pytest.raises(AppError) as exc:
             practice_service._validate_transition(current, target)
         assert exc.value.code == 5006
+
+
+# ---------------------------------------------------------------------------
+# 录音上传（practice.md §6，Phase 8）
+# ---------------------------------------------------------------------------
+
+
+def _make_recording(
+    *,
+    rid: int = 501,
+    attempt_id: int = 401,
+    user_id: int = 1,
+    status: str = "uploaded",
+    duration: int = 86,
+    mime_type: str = "audio/webm",
+    storage_path: str = "recordings/2026/07/abc.webm",
+) -> Recording:
+    return Recording(
+        id=rid,
+        attempt_id=attempt_id,
+        user_id=user_id,
+        storage_type="local",
+        storage_path=storage_path,
+        mime_type=mime_type,
+        duration_seconds=duration,
+        file_size=1234567,
+        status=status,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+
+def _make_storage() -> MagicMock:
+    """mock AudioStorage（save 返回路径，read 返回字节）。"""
+    storage = MagicMock()
+    storage.save = MagicMock(return_value="recordings/2026/07/uuid.webm")
+    storage.read = MagicMock(return_value=b"audio-bytes")
+    storage.delete = MagicMock()
+    storage.exists = MagicMock(return_value=True)
+    storage.__class__.__name__ = "LocalStorageBackend"
+    return storage
+
+
+@pytest.mark.asyncio
+async def test_upload_recording_success_marks_submitted_and_syncs_study_records() -> None:
+    """成功上传：recording.uploaded → attempt.submitted → study_records upsert → log。"""
+    db = _mock_db()
+    attempt = _make_attempt(aid=401, status="recording")
+    recording = _make_recording(rid=501, attempt_id=401)
+    storage = _make_storage()
+
+    async def _insert(_db, **_kw):
+        return recording
+
+    async def _mark_uploaded(_db, rec, *, duration_seconds):
+        rec.status = "uploaded"
+        rec.duration_seconds = duration_seconds
+        return rec
+
+    async def _submit(_db, att, *, duration_seconds):
+        att.status = "submitted"
+        att.submitted_at = datetime.now(UTC)
+        att.duration_seconds = duration_seconds
+        return att
+
+    with (
+        patch("app.modules.practice.service.repo.get_attempt_by_id", new=AsyncMock(return_value=attempt)),
+        patch("app.modules.practice.service.read_duration_seconds", return_value=86),
+        patch("app.modules.practice.service.repo.insert_recording", new=AsyncMock(side_effect=_insert)),
+        patch("app.modules.practice.service.repo.mark_recording_uploaded", new=AsyncMock(side_effect=_mark_uploaded)),
+        patch("app.modules.practice.service.repo.submit_attempt_with_recording", new=AsyncMock(side_effect=_submit)),
+        patch("app.modules.practice.service.repo.get_user_timezone", new=AsyncMock(return_value="Asia/Shanghai")),
+        patch("app.modules.practice.service.repo.compute_record_date", return_value=date(2026, 7, 23)),
+        patch("app.modules.practice.service.repo.upsert_study_record_for_recording", new=AsyncMock()) as upsert_mock,
+    ):
+        result = await practice_service.upload_recording(
+            db, 401,
+            current_user=MagicMock(id=1),
+            file_data=b"audio-bytes",
+            mime_type="audio/webm",
+            file_size=1234567,
+            storage=storage,
+        )
+
+    assert result["status"] == "submitted"
+    assert result["duration_seconds"] == 86
+    assert result["recording"]["status"] == "uploaded"
+    assert result["recording"]["duration_seconds"] == 86
+    upsert_mock.assert_awaited_once()
+    assert db.add.call_args.args[0].action == "recording_uploaded"
+
+
+@pytest.mark.asyncio
+async def test_upload_recording_attempt_not_found_returns_5005() -> None:
+    db = _mock_db()
+    with patch("app.modules.practice.service.repo.get_attempt_by_id", new=AsyncMock(return_value=None)):
+        with pytest.raises(AppError) as exc:
+            await practice_service.upload_recording(
+                db, 999, current_user=MagicMock(id=1),
+                file_data=b"x", mime_type="audio/webm", file_size=10,
+                storage=_make_storage(),
+            )
+    assert exc.value.code == 5005
+    assert exc.value.http_status == 404
+
+
+@pytest.mark.asyncio
+async def test_upload_recording_wrong_user_returns_5003() -> None:
+    db = _mock_db()
+    attempt = _make_attempt(aid=401, user_id=2, status="recording")
+    with patch("app.modules.practice.service.repo.get_attempt_by_id", new=AsyncMock(return_value=attempt)):
+        with pytest.raises(AppError) as exc:
+            await practice_service.upload_recording(
+                db, 401, current_user=MagicMock(id=1),
+                file_data=b"x", mime_type="audio/webm", file_size=10,
+                storage=_make_storage(),
+            )
+    assert exc.value.code == 5003
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["submitted", "skipped", "failed"])
+async def test_upload_recording_terminal_attempt_returns_5006(status: str) -> None:
+    """submitted/skipped/failed 不可再上传 → 5006（需新建 attempt）。"""
+    db = _mock_db()
+    attempt = _make_attempt(aid=401, status=status)
+    with patch("app.modules.practice.service.repo.get_attempt_by_id", new=AsyncMock(return_value=attempt)):
+        with pytest.raises(AppError) as exc:
+            await practice_service.upload_recording(
+                db, 401, current_user=MagicMock(id=1),
+                file_data=b"x", mime_type="audio/webm", file_size=10,
+                storage=_make_storage(),
+            )
+    assert exc.value.code == 5006
+
+
+@pytest.mark.asyncio
+async def test_upload_recording_invalid_mime_returns_6003() -> None:
+    db = _mock_db()
+    attempt = _make_attempt(aid=401, status="recording")
+    with patch("app.modules.practice.service.repo.get_attempt_by_id", new=AsyncMock(return_value=attempt)):
+        with pytest.raises(AppError) as exc:
+            await practice_service.upload_recording(
+                db, 401, current_user=MagicMock(id=1),
+                file_data=b"x", mime_type="video/mp4", file_size=10,
+                storage=_make_storage(),
+            )
+    assert exc.value.code == 6003
+    assert exc.value.http_status == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_recording_oversize_returns_6004() -> None:
+    db = _mock_db()
+    attempt = _make_attempt(aid=401, status="recording")
+    with patch("app.modules.practice.service.repo.get_attempt_by_id", new=AsyncMock(return_value=attempt)):
+        with pytest.raises(AppError) as exc:
+            await practice_service.upload_recording(
+                db, 401, current_user=MagicMock(id=1),
+                file_data=b"x", mime_type="audio/webm",
+                file_size=MAX_FILE_SIZE + 1,
+                storage=_make_storage(),
+            )
+    assert exc.value.code == 6004
+    assert exc.value.http_status == 413
+
+
+@pytest.mark.asyncio
+async def test_upload_recording_metadata_failure_returns_6002_and_cleans_file() -> None:
+    """元数据读取失败 → 6002 + 删除已写文件（practice.md §6.4 step 5b）。"""
+    db = _mock_db()
+    attempt = _make_attempt(aid=401, status="recording")
+    storage = _make_storage()
+
+    with (
+        patch("app.modules.practice.service.repo.get_attempt_by_id", new=AsyncMock(return_value=attempt)),
+        patch("app.modules.practice.service.read_duration_seconds", side_effect=AudioMetadataError("bad")),
+    ):
+        with pytest.raises(AppError) as exc:
+            await practice_service.upload_recording(
+                db, 401, current_user=MagicMock(id=1),
+                file_data=b"x", mime_type="audio/webm", file_size=10,
+                storage=storage,
+            )
+    assert exc.value.code == 6002
+    # 文件已写但元数据失败 → 清理
+    storage.delete.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# 录音下载（practice.md §7，Phase 8）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_download_recording_success_returns_recording_and_bytes() -> None:
+    db = _mock_db()
+    attempt = _make_attempt(aid=401, status="submitted")
+    recording = _make_recording(rid=501, attempt_id=401)
+    storage = _make_storage()
+
+    with (
+        patch("app.modules.practice.service.repo.get_attempt_by_id", new=AsyncMock(return_value=attempt)),
+        patch("app.modules.practice.service.repo.get_recording_for_download", new=AsyncMock(return_value=recording)),
+    ):
+        rec, data = await practice_service.download_recording(
+            db, 401, current_user=MagicMock(id=1), storage=storage,
+        )
+    assert rec.id == 501
+    assert data == b"audio-bytes"
+
+
+@pytest.mark.asyncio
+async def test_download_recording_attempt_not_found_returns_5005() -> None:
+    db = _mock_db()
+    with patch("app.modules.practice.service.repo.get_attempt_by_id", new=AsyncMock(return_value=None)):
+        with pytest.raises(AppError) as exc:
+            await practice_service.download_recording(
+                db, 999, current_user=MagicMock(id=1), storage=_make_storage(),
+            )
+    assert exc.value.code == 5005
+
+
+@pytest.mark.asyncio
+async def test_download_recording_wrong_user_returns_5003() -> None:
+    db = _mock_db()
+    attempt = _make_attempt(aid=401, user_id=2, status="submitted")
+    with patch("app.modules.practice.service.repo.get_attempt_by_id", new=AsyncMock(return_value=attempt)):
+        with pytest.raises(AppError) as exc:
+            await practice_service.download_recording(
+                db, 401, current_user=MagicMock(id=1), storage=_make_storage(),
+            )
+    assert exc.value.code == 5003
+
+
+@pytest.mark.asyncio
+async def test_download_recording_no_recording_returns_6001() -> None:
+    """attempt 无 uploaded 录音 → 6001（practice.md §7.3）。"""
+    db = _mock_db()
+    attempt = _make_attempt(aid=401, status="skipped")
+    with (
+        patch("app.modules.practice.service.repo.get_attempt_by_id", new=AsyncMock(return_value=attempt)),
+        patch("app.modules.practice.service.repo.get_recording_for_download", new=AsyncMock(return_value=None)),
+    ):
+        with pytest.raises(AppError) as exc:
+            await practice_service.download_recording(
+                db, 401, current_user=MagicMock(id=1), storage=_make_storage(),
+            )
+    assert exc.value.code == 6001
+    assert exc.value.http_status == 404
+
+
+# ---------------------------------------------------------------------------
+# compute_record_date（ADR-018 timezone 切日）
+# ---------------------------------------------------------------------------
+
+
+def test_compute_record_date_utc_to_shanghai() -> None:
+    """UTC 16:00 → Shanghai 次日 00:00，切日正确（ADR-018）。"""
+    from app.modules.practice.repository import compute_record_date
+
+    # UTC 2026-07-23 16:00 = Shanghai 2026-07-24 00:00
+    utc_time = datetime(2026, 7, 23, 16, 0, tzinfo=UTC)
+    d = compute_record_date(utc_time, "Asia/Shanghai")
+    assert d == date(2026, 7, 24)
+
+
+def test_compute_record_date_invalid_timezone_falls_back() -> None:
+    """非法 timezone → 回退 Asia/Shanghai。"""
+    from app.modules.practice.repository import compute_record_date
+
+    utc_time = datetime(2026, 7, 23, 10, 0, tzinfo=UTC)
+    d = compute_record_date(utc_time, "Invalid/Zone")
+    assert d == date(2026, 7, 23)

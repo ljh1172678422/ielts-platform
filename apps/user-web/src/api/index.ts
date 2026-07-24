@@ -2,6 +2,15 @@ import axios, { type AxiosResponse } from 'axios'
 import type { ResponseEnvelope, ErrorEnvelope, ApiErrorDetail } from '@ielts/types'
 
 /**
+ * 检测 FormData：让 axios 自动设置 multipart/form-data + boundary。
+ * 实例默认 Content-Type=application/json 会覆盖 multipart，
+ * 必须删除后 axios 才能根据 body 类型推断正确的 Content-Type。
+ */
+function isFormData(value: unknown): value is FormData {
+  return typeof FormData !== 'undefined' && value instanceof FormData
+}
+
+/**
  * 统一 API 响应结构（复用 @ielts/types，对齐 docs/api/common.md §2）
  * 成功：{ code: 0, message: 'ok', data: ... }
  * 错误：{ code: <非0>, message, data: null, details? }
@@ -56,6 +65,11 @@ request.interceptors.request.use(
     const token = localStorage.getItem(TOKEN_STORAGE_KEY)
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
+    }
+    // FormData：删除默认 Content-Type，让 axios 自动加 multipart/form-data + boundary
+    if (isFormData(config.data)) {
+      delete config.headers['Content-Type']
+      delete config.headers['content-type']
     }
     return config
   },

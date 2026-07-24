@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, ApiError } from '@/api'
+import { useRecorder } from '@/composables/useRecorder'
 import type {
   Attempt,
   AttemptStatus,
@@ -17,6 +18,14 @@ const loading = ref(false)
 const acting = ref(false)
 const session = ref<PracticeSession | null>(null)
 const activeSqId = ref<string | null>(null)
+
+// 录音状态机（单一录音器，绑定当前操作题目，practice.md §5/§6）
+const recorder = useRecorder({ maxSeconds: 300 })
+// 当前正在录音的 attempt（用于 stop 时上传）
+const recordingAttemptId = ref<string | null>(null)
+// 录音下载/播放：每 attempt 一个 ObjectURL，停止播放时释放
+const playbackUrls = ref<Record<string, string>>({})
+const playbackLoading = ref<Record<string, boolean>>({})
 
 const sessionId = computed(() => String(route.params.id))
 
@@ -98,7 +107,7 @@ function sqStatusType(sq: SessionQuestion): '' | 'success' | 'info' | 'warning' 
 }
 
 // ---------------------------------------------------------------------------
-// attempt 状态机操作（practice.md §4/§5）
+// attempt 状态机操作（practice.md §4/§5/§6）
 // ---------------------------------------------------------------------------
 
 /** 创建答题尝试（POST /practice/attempts，practice.md §4）。 */
@@ -139,6 +148,146 @@ async function updateStatus(
     acting.value = false
   }
 }
+
+/**
+ * 开始录音：PATCH attempt status=recording → 启动 MediaRecorder（practice.md §5/§6.4 step 1）。
+ * 乐观更新：先本地切 recording 状态，再异步 PATCH，失败回滚。
+ */
+async function startRecording(sq: SessionQuestion): Promise<void> {
+  const last = lastAttempt(sq)
+  if (!last || recorder.isBusy.value) return
+  // 仅 pending → recording 允许（practice.md §5.3）
+  if (last.status !== 'pending') {
+    ElMessage.warning('当前状态不可开始录音')
+    return
+  }
+
+  // 乐观更新 UI：本地先切 recording（practice.md §5.5）
+  const originalStatus = last.status
+  last.status = 'recording'
+  recordingAttemptId.value = last.id
+
+  // 异步 PATCH + 启动 MediaRecorder
+  const started = await recorder.start(last.id)
+  if (!started) {
+    // MediaRecorder 启动失败 → 回滚 attempt 状态
+    last.status = originalStatus
+    recordingAttemptId.value = null
+    return
+  }
+
+  try {
+    const updated = await api.patch<Attempt>(`/practice/attempts/${last.id}`, {
+      status: 'recording',
+    })
+    // PATCH 返回的 updated 可能含后端时间戳，合并到本地
+    const idx = sq.attempts.findIndex((a) => a.id === last.id)
+    if (idx >= 0) sq.attempts[idx] = updated
+  } catch (err) {
+    // PATCH 失败 → 取消录音并回滚
+    recorder.cancel()
+    recordingAttemptId.value = null
+    last.status = originalStatus
+    ElMessage.error(err instanceof ApiError ? err.message : '更新录音状态失败')
+  }
+}
+
+/**
+ * 停止录音并上传（practice.md §6.4，事务：recording.uploaded → attempt.submitted → study_records）。
+ * stop() 内部完成 multipart 上传，返回更新后的 Attempt。
+ */
+async function stopRecording(sq: SessionQuestion): Promise<void> {
+  const attemptId = recordingAttemptId.value
+  if (!attemptId) return
+  const updated = await recorder.stop(attemptId)
+  recordingAttemptId.value = null
+  if (!updated) {
+    // 上传失败，状态机已切 error，UI 显示重试按钮
+    return
+  }
+  // 替换末尾 attempt（含 recording + duration_seconds）
+  const idx = sq.attempts.findIndex((a) => a.id === attemptId)
+  if (idx >= 0) sq.attempts[idx] = updated
+  ElMessage.success('录音上传成功')
+}
+
+/** 放弃当前录音（不上传，回到 recording→skipped 走 PATCH，practice.md §5.3）。 */
+async function abandonRecording(sq: SessionQuestion): Promise<void> {
+  recorder.cancel()
+  recordingAttemptId.value = null
+  // recording → skipped 走 PATCH 状态机（practice.md §5.3 允许）
+  await updateStatus(sq, 'skipped')
+}
+
+/** 重新录音（submitted/skipped/failed → 新建 attempt，practice.md §4）。 */
+async function retryRecording(sq: SessionQuestion): Promise<void> {
+  recorder.reset()
+  recordingAttemptId.value = null
+  await createAttempt(sq)
+}
+
+// ---------------------------------------------------------------------------
+// 录音下载/播放（practice.md §7，GET /practice/attempts/{id}/recording）
+// ---------------------------------------------------------------------------
+
+/**
+ * 用 axios 原始 blob 请求下载录音字节（绕过统一信封解包，practice.md §7.4）。
+ * 下载接口直接返回 audio 流，不走 { code, message, data } 信封。
+ */
+async function fetchRecordingBlob(attemptId: string): Promise<Blob> {
+  const { default: request } = await import('@/api')
+  const response = await request.get(`/practice/attempts/${attemptId}/recording`, {
+    responseType: 'blob',
+    // blob 模式下不解析 JSON 信封
+    transformResponse: [(data) => data],
+  })
+  // 响应拦截器返回 body.data，blob 模式下 response.data 即 Blob
+  return response.data as unknown as Blob
+}
+
+/**
+ * 加载录音播放 URL（按需下载，practice.md §7.4）。
+ * blob URL 缓存到 playbackUrls，离开页面或重新加载时由浏览器自动释放。
+ */
+async function loadPlayback(sq: SessionQuestion): Promise<void> {
+  const last = lastAttempt(sq)
+  if (!last || !last.recording) return
+  if (playbackUrls.value[last.id]) return // 已加载
+  playbackLoading.value[last.id] = true
+  try {
+    const blob = await fetchRecordingBlob(last.id)
+    playbackUrls.value[last.id] = URL.createObjectURL(blob)
+  } catch (err) {
+    ElMessage.error(err instanceof ApiError ? err.message : '录音加载失败')
+  } finally {
+    playbackLoading.value[last.id] = false
+  }
+}
+
+/** 触发浏览器下载录音文件（practice.md §7.4）。 */
+async function downloadAudio(sq: SessionQuestion): Promise<void> {
+  const last = lastAttempt(sq)
+  if (!last || !last.recording) return
+  const ext = (last.recording.mime_type.split('/')[1] || 'webm').split(';')[0]
+  const filename = `attempt-${last.attempt_number}.${ext}`
+  try {
+    const blob = await fetchRecordingBlob(last.id)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (err) {
+    ElMessage.error(err instanceof ApiError ? err.message : '录音下载失败')
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 完成会话（practice.md §8，ADR-015）
+// ---------------------------------------------------------------------------
 
 /** 完成会话（POST /practice/sessions/{id}/complete，practice.md §8，ADR-015）。 */
 async function completeSession(): Promise<void> {
@@ -289,7 +438,12 @@ onMounted(fetchSession)
 
                   <!-- 基于 last attempt 状态显示操作（practice.md §5.3 状态机） -->
                   <template v-if="lastAttempt(sq)?.status === 'pending'">
-                    <el-button type="primary" size="small" :loading="acting" @click="updateStatus(sq, 'recording')">
+                    <el-button
+                      type="primary"
+                      size="small"
+                      :loading="recorder.isBusy.value"
+                      @click="startRecording(sq)"
+                    >
                       开始录音
                     </el-button>
                     <el-button size="small" :loading="acting" @click="updateStatus(sq, 'skipped')">
@@ -297,35 +451,86 @@ onMounted(fetchSession)
                     </el-button>
                   </template>
 
+                  <template v-else-if="lastAttempt(sq)?.status === 'recording' && recordingAttemptId === lastAttempt(sq)?.id">
+                    <!-- 录音中：显示计时器 + 停止/放弃（practice.md §6） -->
+                    <span class="inline-flex items-center gap-1 text-sm font-mono text-rose-600">
+                      <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-rose-500" />
+                      {{ recorder.elapsedLabel.value }}
+                    </span>
+                    <el-button
+                      type="success"
+                      size="small"
+                      :loading="recorder.isBusy.value"
+                      @click="stopRecording(sq)"
+                    >
+                      停止并上传
+                    </el-button>
+                    <el-button size="small" :loading="acting" @click="abandonRecording(sq)">
+                      放弃并跳过
+                    </el-button>
+                  </template>
+
                   <template v-else-if="lastAttempt(sq)?.status === 'recording'">
+                    <!-- 续练恢复：recording 状态但本地未在录音（断线重连场景） -->
                     <el-button size="small" :loading="acting" @click="updateStatus(sq, 'skipped')">
                       放弃并跳过
                     </el-button>
                     <el-button size="small" type="danger" :loading="acting" @click="updateStatus(sq, 'failed')">
-                      录音失败
+                      标记失败
                     </el-button>
-                    <span class="text-xs text-indigo-400">录音上传功能将在 Phase 8 上线</span>
+                    <span class="text-xs text-gray-400">如需重新录音，请先放弃或标记失败</span>
                   </template>
 
                   <template v-else-if="lastAttempt(sq)?.status === 'failed'">
-                    <el-button size="small" :loading="acting" @click="createAttempt(sq)">
+                    <el-button size="small" :loading="acting" @click="retryRecording(sq)">
                       重新答题
                     </el-button>
                   </template>
 
                   <template v-else-if="lastAttempt(sq)?.status === 'skipped'">
-                    <el-button size="small" :loading="acting" @click="createAttempt(sq)">
+                    <el-button size="small" :loading="acting" @click="retryRecording(sq)">
                       重新答题
                     </el-button>
                   </template>
 
                   <template v-else-if="lastAttempt(sq)?.status === 'submitted'">
-                    <el-button size="small" :loading="acting" @click="createAttempt(sq)">
+                    <el-button size="small" :loading="acting" @click="retryRecording(sq)">
                       重新录音
                     </el-button>
                   </template>
                 </template>
               </footer>
+
+              <!-- 录音播放/下载区（practice.md §7，仅 submitted 且有 recording 时显示） -->
+              <div
+                v-if="lastAttempt(sq)?.status === 'submitted' && lastAttempt(sq)?.recording"
+                class="mt-3 rounded-xl bg-gray-50 p-3"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-xs text-gray-500">录音回放</span>
+                  <span v-if="lastAttempt(sq)?.recording?.duration_seconds" class="text-xs text-gray-400">
+                    时长 {{ formatDuration(lastAttempt(sq)?.recording?.duration_seconds ?? null) }}
+                  </span>
+                  <el-button
+                    link
+                    type="primary"
+                    size="small"
+                    :loading="playbackLoading[lastAttempt(sq)!.id]"
+                    @click="loadPlayback(sq)"
+                  >
+                    加载播放
+                  </el-button>
+                  <el-button link type="primary" size="small" @click="downloadAudio(sq)">
+                    下载
+                  </el-button>
+                </div>
+                <audio
+                  v-if="playbackUrls[lastAttempt(sq)!.id]"
+                  :src="playbackUrls[lastAttempt(sq)!.id]"
+                  controls
+                  class="mt-2 w-full"
+                />
+              </div>
             </article>
           </section>
 
