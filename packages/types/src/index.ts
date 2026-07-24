@@ -464,3 +464,62 @@ export interface RecomputeResponse {
   duration_seconds_total: number;
 }
 
+// ---------------------------------------------------------------------------
+// 首页模块（home.md §2/§4）
+// ---------------------------------------------------------------------------
+
+/** 推荐来源标签（home.md §2.5，ADR-028 5 级短路）。 */
+export type RecommendationReason =
+  | 'unfinished_session'
+  | 'recent_topic'
+  | 'favorite'
+  | 'less_practiced_part'
+  | 'popular';
+
+/** 首页 goal_progress（home.md §4，扩展 learning GoalProgress）。 */
+export interface HomeGoalProgress extends GoalProgress {
+  /** 目标分数，无 active goal 或未设时为 null */
+  target_score: number | null;
+  /** 考试日期 YYYY-MM-DD，无 active goal 或未设时为 null */
+  exam_date: ISODate | null;
+}
+
+/** 未完成 session 摘要（home.md §2.2 recent_practice.session）。 */
+export interface UnfinishedSessionSummary {
+  id: ID;
+  status: SessionStatus;
+  mode: PracticeMode;
+  question_count: number;
+  /** 已有 submitted/skipped attempt 的 sq 数 */
+  completed_questions: number;
+  updated_at: ISODateTime;
+}
+
+/** 最近练习（home.md §2.2 recent_practice）。 */
+export interface RecentPractice {
+  has_unfinished: boolean;
+  session: UnfinishedSessionSummary | null;
+}
+
+/** 推荐题目（home.md §4，QuestionListItem - is_favorited + reason）。 */
+export interface Recommendation {
+  id: ID;
+  part: SpeakingPart;
+  title: string;
+  topic: TopicRef;
+  difficulty: number | null;
+  practice_count: number;
+  /** 推荐来源标签 */
+  reason: RecommendationReason;
+}
+
+/** 首页聚合响应（home.md §2.2）。 */
+export interface HomeOverview {
+  today: DayStats;
+  streak: StreakStats;
+  /** 无 active goal 时为 null（whole field null，非空对象） */
+  goal_progress: HomeGoalProgress | null;
+  recent_practice: RecentPractice;
+  recommendations: Recommendation[];
+}
+

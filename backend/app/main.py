@@ -18,6 +18,7 @@ from app.core.exceptions import register_exception_handlers, success
 from app.modules import (
     admin_router,
     auth_router,
+    home_router,
     learning_router,
     practice_router,
     questions_router,
@@ -59,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(questions_router, prefix="/api/v1")
     app.include_router(practice_router, prefix="/api/v1")
     app.include_router(learning_router, prefix="/api/v1")
+    app.include_router(home_router, prefix="/api/v1")
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, Any]:

@@ -17,7 +17,7 @@
 
 ## 2. 当前阶段
 
-**Phase 9 — 学习数据（已完成）** → 下一步 **Phase 10 — 首页**
+**Phase 10 — 首页（已完成）** → 下一步 **Phase 11 — 测试**
 
 ```text
 [完成] === Phase 0 文档设计阶段全部完成 ===
@@ -94,6 +94,17 @@
          packages/types 增加 13 个 learning DTO (LearningOverview/TrendResponse/TopicStat 等)
          路由 /learning 受保护
          test_learning 25 单测全绿；type-check + build 通过(LearningView chunk 564KB 含 echarts)
+[完成] === Phase 10 首页 ===
+  - 10.1 首页 API (GET /home/overview: 单接口聚合 today/streak/goal_progress/recent_practice/recommendations；
+         ADR-028 确定性推荐 5 级短路 unfinished_session→recent_topic→favorite→less_practiced_part→popular；
+         复用 learning.repository 子查询 fetch_today_streak_goal；跨级 question_id 去重；凑齐即停；
+         goal_progress 扩展 target_score/exam_date；无 active goal 时 whole field null；
+         recommendation_limit ∈ [1,10] 越界→1001/422；home.md §2.4 错误码对齐)
+  - 10.2 user-web 首页改造 (views/HomeView.vue: 未登录落地页 + 已登录聚合仪表盘；
+         今日统计 4 卡片 + 连续打卡/目标进度双栏 + 未完成 session 继续练习入口 +
+         推荐列表含 reason 标签(5 种颜色映射) + 点击跳题目详情；
+         packages/types 增加 6 个 home DTO (HomeOverview/Recommendation/RecommendationReason 等))
+         test_home 11 单测全绿；163 后端单测全绿；ruff 通过；type-check + build 通过
 [待办-用户] === 本地 Docker 验证 ===
   ⚠ 沙箱不做预览/运行测试（无 Docker / 无 PG）。用户将在本地 docker compose up 后统一验证：
      - 1.6 四服务全绿 + /health 200
@@ -104,30 +115,29 @@
      - 7.x 练习会话全生命周期（创建/续练/答题状态机/ADR-015 完成）
      - 8.x 录音上传/下载/回放 + study_records 同步 + duration 后端计算
      - 9.x 学习概览/趋势/分布/重算（含 streak 算法/时区切日/ECharts 渲染）
+     - 10.x 首页聚合 + 5 级推荐（确定性可复现）
   沙箱侧只保证：单测全绿、type-check + build 通过、ruff 通过、迁移 offline SQL 语法正确。
-[待办]   Phase 10+ 首页/测试/部署
+[待办]   Phase 11+ 测试/部署
 ```
 
 ---
 
 ## 3. 当前任务
 
-- **Phase 9 学习数据已全部完成**（9.1–9.5）：overview + daily/weekly/monthly 趋势 + topics/parts 分布 + recompute 重算 + user-web ECharts 数据页。
-- **下一步**：阶段 10 首页 —— home 模块（GET /home/overview 单接口聚合 5 级推荐 + user-web 首页改造）。
+- **Phase 10 首页已全部完成**（10.1–10.2）：home 后端模块（GET /home/overview 单接口聚合 + ADR-028 5 级推荐短路）+ user-web HomeView 聚合仪表盘改造（推荐含 reason 标签）。
+- **下一步**：阶段 11 测试 —— 补充端到端测试（后端 auth/practice/recording/learning + 前端登录/练习录音流程）。
 - **沙箱不做预览/运行验证**（无 Docker / 无 PG）；用户将在本地 docker compose up 后统一验收。
 - 沙箱侧仅保证：单测全绿、`type-check + build` 通过、`ruff` 通过。
 
-### 3.1 当前任务边界（阶段 10 生效）
+### 3.1 当前任务边界（阶段 11 生效）
 
-**阶段 10 允许：**
-- 按 development-plan.md §12 顺序执行任务 10.1–10.2。
-- 实现 home 后端模块（home.md §2：GET /home/overview 单接口聚合 5 级推荐）。
-- 复用 Phase 6/7/9 模块（questions/practice/learning）。
-- 推荐 5 级（newest/popular/topic-based/incomplete/recommended）确定性可复现。
-- user-web HomeView 改造为聚合首页（推荐含 reason）。
+**阶段 11 允许：**
+- 按 development-plan.md §13 顺序执行任务 11.1–11.6。
+- 补充后端测试（auth/practice/recording/learning 端到端，对齐 ADR-015/状态机/事务回滚）。
+- 补充前端测试（Vitest/Playwright 登录跳转 + 练习录音完整闭环）。
 - 一次只执行一个任务，完成即 commit + 更新 AI_CONTEXT。
 
-**禁止（阶段 10 仍生效）：**
+**禁止（阶段 11 仍生效）：**
 - ❌ 修改已锁定文档（PROJECT_SPEC / database-design / system-architecture / 全部 API 文档 / user-flow / development-plan）。
 - ❌ 改变 DB schema（阶段 2 已锁定 15 表 + 约束 + 索引；如需变更先走修改规则）。
 - ❌ 偏离 system-architecture §3 分层（router→service→repository，session 注入 repository）。
@@ -136,7 +146,7 @@
 - ❌ 前端直设 attempt status=submitted（只能由录音上传事务设置）。
 - ❌ 一次性生成整个项目（PROJECT_SPEC §开发原则）。
 
-> 阶段 9 → 阶段 10 转换已由用户连续执行模式授权覆盖，无需再次确认。
+> 阶段 10 → 阶段 11 转换已由用户连续执行模式授权覆盖，无需再次确认。
 
 ---
 
@@ -250,6 +260,19 @@
 | user-web 学习数据页 | `apps/user-web/src/views/LearningView.vue` | ✅ | 概览卡片(今日/连续/累计/目标) + 趋势图(线柱混合 daily/weekly/monthly 切换) + 主题分布(环图) + Part 分布(双轴柱状)；granularity/months watch 自动刷新；type-check+build 通过 |
 | 路由扩展 | `apps/user-web/src/router/index.ts` | ✅ | +/learning 受保护路由 |
 | 共享类型（学习数据域） | `packages/types/src/index.ts` | ✅ | +LearningOverview/DayStats/StreakStats/CumulativeStats/GoalProgress/TrendPoint/TrendResponse/TopicStat/TopicsDistributionResponse/PartStat/PartsDistributionResponse/RecomputeRequest/RecomputeResponse/TrendGranularity |
+
+**代码模块（Phase 10 首页）**：
+
+| 模块 | 路径 | 状态 | 验收 |
+| --- | --- | --- | --- |
+| home 后端模块 | `backend/app/modules/home/{__init__,router,service,repository,schemas}.py` | ✅ | 1 接口：GET /home/overview 单接口聚合；ADR-028 5 级推荐短路(unfinished_session→recent_topic→favorite→less_practiced_part→popular)；复用 learning.repository 子查询 fetch_today_streak_goal；goal_progress 扩展 target_score/exam_date；recommendation_limit ∈ [1,10] 越界→1001/422 |
+| home repository | `backend/app/modules/home/repository.py` | ✅ | fetch_today_streak_goal(复用 learning 子查询) + 5 级推荐查询(get_unfinished_session_questions/get_recent_topic_questions/get_favorite_questions/get_less_practiced_part_questions/get_popular_questions) + batch_practice_counts_by_questions + to_recommendation_dict |
+| home service | `backend/app/modules/home/service.py` | ✅ | get_overview 编排 + _build_recent_practice + _build_recommendations(5 级短路，跨级 question_id 去重，凑齐即停) |
+| home schemas | `backend/app/modules/home/schemas.py` | ✅ | HomeOverview/HomeGoalProgress/RecentPractice/UnfinishedSessionSummary/Recommendation DTO 对齐 home.md §4 |
+| main 路由注册 | `backend/app/main.py` + `app/modules/__init__.py` | ✅ | +home_router 挂载到 /api/v1（1 接口在 OpenAPI 出现） |
+| user-web 首页改造 | `apps/user-web/src/views/HomeView.vue` | ✅ | 未登录落地页 + 已登录聚合仪表盘（今日统计 4 卡片 + 连续打卡/目标进度双栏 + 未完成 session 继续练习入口 + 推荐列表含 reason 标签 5 种颜色映射 + 点击跳题目详情）；type-check+build 通过 |
+| 共享类型（首页域） | `packages/types/src/index.ts` | ✅ | +HomeOverview/HomeGoalProgress/RecentPractice/UnfinishedSessionSummary/Recommendation/RecommendationReason |
+| test_home | `backend/tests/test_home.py` | ✅ | 11 单测全绿（recommendation_limit 校验 + recent_practice + 5 级推荐短路 + 跨级去重 + goal_progress 扩展） |
 
 **后端关键文件（Phase 3-4 已实现）**：
 - `backend/app/main.py` — create_app() 工厂 + /health + auth/users 路由注册
