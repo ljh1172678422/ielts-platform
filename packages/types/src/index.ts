@@ -354,3 +354,113 @@ export interface CreateAttemptRequest {
 export interface UpdateAttemptRequest {
   status: 'recording' | 'skipped' | 'failed';
 }
+
+// ---------------------------------------------------------------------------
+// 学习数据域（learning.md v0.1）
+// ---------------------------------------------------------------------------
+
+/** 趋势粒度（learning.md §3.2/§4.2/§5.2）。 */
+export type TrendGranularity = 'daily' | 'weekly' | 'monthly';
+
+/** 单日统计（learning.md §2.2 today / §3.2 points 聚合字段）。 */
+export interface DayStats {
+  practice_count: number;
+  question_count: number;
+  attempt_count: number;
+  recording_count: number;
+  duration_seconds: number;
+}
+
+/** 连续学习天数（learning.md §2.2 streak）。 */
+export interface StreakStats {
+  current_days: number;
+  longest_days: number;
+}
+
+/** 累计统计（learning.md §2.2 cumulative）。 */
+export interface CumulativeStats {
+  total_sessions: number;
+  total_questions: number;
+  total_attempts: number;
+  total_recordings: number;
+  total_duration_seconds: number;
+}
+
+/** 目标达成度（learning.md §2.2 goal_progress，无 active goal 时全 null）。 */
+export interface GoalProgress {
+  daily_goal_minutes: number | null;
+  daily_completed_minutes: number | null;
+  weekly_goal_minutes: number | null;
+  weekly_completed_minutes: number | null;
+}
+
+/** 学习概览（learning.md §2.2）。 */
+export interface LearningOverview {
+  today: DayStats;
+  streak: StreakStats;
+  cumulative: CumulativeStats;
+  goal_progress: GoalProgress;
+}
+
+/** 趋势点（learning.md §10.1，daily/weekly/monthly 共用）。 */
+export interface TrendPoint extends DayStats {
+  /** daily 用 */
+  date?: ISODate;
+  /** weekly 用 */
+  week_start?: ISODate;
+  week_end?: ISODate;
+  /** monthly 用，格式 YYYY-MM */
+  month?: string;
+}
+
+/** 趋势响应（learning.md §3.2/§4.2/§5.2）。 */
+export interface TrendResponse {
+  granularity: TrendGranularity;
+  timezone: string;
+  points: TrendPoint[];
+}
+
+/** 主题分布项（learning.md §6.2）。 */
+export interface TopicStat {
+  topic_id: ID;
+  topic_name: string;
+  attempt_count: number;
+  duration_seconds: number;
+}
+
+/** 主题分布响应（learning.md §6.2）。 */
+export interface TopicsDistributionResponse {
+  range_months: number;
+  timezone: string;
+  topics: TopicStat[];
+}
+
+/** Part 分布项（learning.md §7.2）。 */
+export interface PartStat {
+  part: SpeakingPart;
+  attempt_count: number;
+  duration_seconds: number;
+}
+
+/** Part 分布响应（learning.md §7.2）。 */
+export interface PartsDistributionResponse {
+  range_months: number;
+  timezone: string;
+  parts: PartStat[];
+}
+
+/** 重算请求（learning.md §8.1）。 */
+export interface RecomputeRequest {
+  user_id?: ID;
+  start_date?: ISODate;
+  end_date?: ISODate;
+}
+
+/** 重算响应（learning.md §8.2）。 */
+export interface RecomputeResponse {
+  recomputed_users: number;
+  recomputed_records: number;
+  deleted_records: number;
+  duration_seconds_total: number;
+}
+

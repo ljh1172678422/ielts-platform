@@ -17,7 +17,7 @@
 
 ## 2. 当前阶段
 
-**Phase 8 — 录音上传/下载（已完成）** → 下一步 **Phase 9 — 学习数据**
+**Phase 9 — 学习数据（已完成）** → 下一步 **Phase 10 — 首页**
 
 ```text
 [完成] === Phase 0 文档设计阶段全部完成 ===
@@ -76,6 +76,24 @@
          PracticeView 集成录音 UI + 乐观更新 + 录音回放/下载(audio 标签 + blob URL))
          api/index.ts 增加 FormData 检测自动设置 multipart/form-data + boundary
          test_practice 52 单测全绿；type-check + build 通过
+[完成] === Phase 9 学习数据 ===
+  - 9.1 概览 API (GET /learning/overview: today/streak/cumulative/goal_progress；
+         ADR-018 时区切日；streak 内存计算 current_days/longest_days；active goal 无则全 null)
+  - 9.2 趋势 API (GET /learning/{daily,weekly,monthly}: study_records 按 record_date 切分；
+         补零缺失日期/周/月；按 ASC 排序；days∈[1,90]/weeks∈[1,52]/months∈[1,24])
+  - 9.3 分布 API (GET /learning/{topics,parts}: 实时从事实表聚合 attempts JOIN sq JOIN recordings；
+         GROUP BY snapshot.topic_id/topic_name 或 snapshot.part；ADR-016 duration 口径；ORDER BY attempt_count DESC)
+  - 9.4 重算 API (POST /learning/recompute: admin 鉴权(2003)+user_id 校验(7001)+user_id 非法(1001)；
+         事务内 DELETE+INSERT study_records；按用户各自 timezone 切日(ADR-018)；
+         practice_count=COUNT(sessions WHERE completed)/attempt_count=COUNT(submitted attempts)/
+         question_count=COUNT(DISTINCT sq)/recording_count/duration_seconds=SUM(recordings)；
+         活动日志 study_records_recomputed)
+  - 9.5 user-web 学习数据页 (composables/useECharts.ts: ECharts 6 按需引入 + resize/dispose 自动管理；
+         views/LearningView.vue: 概览卡片(今日/连续/累计/目标) + 趋势图(线柱混合) +
+         主题分布(环图) + Part 分布(双轴柱状)；granularity/months watch 自动刷新)
+         packages/types 增加 13 个 learning DTO (LearningOverview/TrendResponse/TopicStat 等)
+         路由 /learning 受保护
+         test_learning 25 单测全绿；type-check + build 通过(LearningView chunk 564KB 含 echarts)
 [待办-用户] === 本地 Docker 验证 ===
   ⚠ 沙箱不做预览/运行测试（无 Docker / 无 PG）。用户将在本地 docker compose up 后统一验证：
      - 1.6 四服务全绿 + /health 200
@@ -85,32 +103,31 @@
      - 6.x 题库浏览/筛选/收藏/详情 4001/4002 分级
      - 7.x 练习会话全生命周期（创建/续练/答题状态机/ADR-015 完成）
      - 8.x 录音上传/下载/回放 + study_records 同步 + duration 后端计算
+     - 9.x 学习概览/趋势/分布/重算（含 streak 算法/时区切日/ECharts 渲染）
   沙箱侧只保证：单测全绿、type-check + build 通过、ruff 通过、迁移 offline SQL 语法正确。
-[待办]   Phase 9+ 学习数据/首页/测试/部署
+[待办]   Phase 10+ 首页/测试/部署
 ```
 
 ---
 
 ## 3. 当前任务
 
-- **Phase 8 录音上传/下载已全部完成**（8.1–8.6）：录音存储抽象 + 元数据读取 + 上传/下载 API + study_records 同步 + user-web MediaRecorder 状态机组件。
-- **下一步**：阶段 9 学习数据 —— learning 模块（overview / daily-weekly-monthly 趋势 / topics-parts 分布 / recompute 重算 / user-web 数据页 ECharts）。
+- **Phase 9 学习数据已全部完成**（9.1–9.5）：overview + daily/weekly/monthly 趋势 + topics/parts 分布 + recompute 重算 + user-web ECharts 数据页。
+- **下一步**：阶段 10 首页 —— home 模块（GET /home/overview 单接口聚合 5 级推荐 + user-web 首页改造）。
 - **沙箱不做预览/运行验证**（无 Docker / 无 PG）；用户将在本地 docker compose up 后统一验收。
 - 沙箱侧仅保证：单测全绿、`type-check + build` 通过、`ruff` 通过。
 
-### 3.1 当前任务边界（阶段 9 生效）
+### 3.1 当前任务边界（阶段 10 生效）
 
-**阶段 9 允许：**
-- 按 development-plan.md §11 顺序执行任务 9.1–9.5。
-- 实现 learning 后端模块（learning.md §2-§8：overview / daily / weekly / monthly / topics / parts / history / recompute）。
-- 统计走事实表（recordings / practice_sessions / practice_attempts），study_records 仅作聚合缓存（ADR-008）。
-- 按 user_profiles.timezone 切日（ADR-018）。
-- streak 连续天数计算（learning.md §2）。
-- 重算接口仅 admin 可调（learning.md §8）。
-- user-web 数据页使用 ECharts 渲染趋势/分布图。
+**阶段 10 允许：**
+- 按 development-plan.md §12 顺序执行任务 10.1–10.2。
+- 实现 home 后端模块（home.md §2：GET /home/overview 单接口聚合 5 级推荐）。
+- 复用 Phase 6/7/9 模块（questions/practice/learning）。
+- 推荐 5 级（newest/popular/topic-based/incomplete/recommended）确定性可复现。
+- user-web HomeView 改造为聚合首页（推荐含 reason）。
 - 一次只执行一个任务，完成即 commit + 更新 AI_CONTEXT。
 
-**禁止（阶段 9 仍生效）：**
+**禁止（阶段 10 仍生效）：**
 - ❌ 修改已锁定文档（PROJECT_SPEC / database-design / system-architecture / 全部 API 文档 / user-flow / development-plan）。
 - ❌ 改变 DB schema（阶段 2 已锁定 15 表 + 约束 + 索引；如需变更先走修改规则）。
 - ❌ 偏离 system-architecture §3 分层（router→service→repository，session 注入 repository）。
@@ -119,7 +136,7 @@
 - ❌ 前端直设 attempt status=submitted（只能由录音上传事务设置）。
 - ❌ 一次性生成整个项目（PROJECT_SPEC §开发原则）。
 
-> 阶段 8 → 阶段 9 转换已由用户连续执行模式授权覆盖，无需再次确认。
+> 阶段 9 → 阶段 10 转换已由用户连续执行模式授权覆盖，无需再次确认。
 
 ---
 
@@ -220,6 +237,19 @@
 | api 拦截器扩展 | `apps/user-web/src/api/index.ts` | ✅ | +FormData 检测自动设置 multipart/form-data + boundary（删除默认 Content-Type） |
 | mutagen 依赖 | `backend/pyproject.toml` | ✅ | +mutagen 用于音频元数据解析 |
 | test_practice 扩展 | `backend/tests/test_practice.py` | ✅ | 52 单测全绿（Phase 7 22 + Phase 8 录音上传/下载/study_records 同步 30） |
+
+**代码模块（Phase 9 学习数据）**：
+
+| 模块 | 路径 | 状态 | 验收 |
+| --- | --- | --- | --- |
+| learning 后端模块 | `backend/app/modules/learning/{__init__,router,service,repository,schemas}.py` | ✅ | 7 接口：overview/daily/weekly/monthly/topics/parts/recompute；ADR-008/016/018/022 落地；1001/2003/7001 错误码；test_learning 25 单测全绿 |
+| learning repository | `backend/app/modules/learning/repository.py` | ✅ | study_records 聚合查询 + 事实表分布聚合(attempts JOIN sq JOIN recordings) + recompute_for_user(DELETE+INSERT) + timezone 工具(get_timezone/to_local_date/today_in_timezone/week_monday/month_start/add_months) |
+| learning schemas | `backend/app/modules/learning/schemas.py` | ✅ | 13 DTO 对齐 learning.md §10；validate_days/weeks/months 范围校验(1001/422) |
+| main 路由注册 | `backend/app/main.py` + `app/modules/__init__.py` | ✅ | +learning_router 挂载到 /api/v1（7 接口在 OpenAPI 出现） |
+| ECharts composable | `apps/user-web/src/composables/useECharts.ts` | ✅ | ECharts 6 按需引入(Bar/Line/Pie + Grid/Legend/Title/Tooltip) + shallowRef 实例 + resize 监听 + onBeforeUnmount dispose |
+| user-web 学习数据页 | `apps/user-web/src/views/LearningView.vue` | ✅ | 概览卡片(今日/连续/累计/目标) + 趋势图(线柱混合 daily/weekly/monthly 切换) + 主题分布(环图) + Part 分布(双轴柱状)；granularity/months watch 自动刷新；type-check+build 通过 |
+| 路由扩展 | `apps/user-web/src/router/index.ts` | ✅ | +/learning 受保护路由 |
+| 共享类型（学习数据域） | `packages/types/src/index.ts` | ✅ | +LearningOverview/DayStats/StreakStats/CumulativeStats/GoalProgress/TrendPoint/TrendResponse/TopicStat/TopicsDistributionResponse/PartStat/PartsDistributionResponse/RecomputeRequest/RecomputeResponse/TrendGranularity |
 
 **后端关键文件（Phase 3-4 已实现）**：
 - `backend/app/main.py` — create_app() 工厂 + /health + auth/users 路由注册
@@ -483,3 +513,4 @@ admin:       users / topics / tags / questions (CRUD + 启停)
 | 2026-07-23 | **Phase 6 题库系统（用户端）全部完成** | questions 后端模块(列表/详情/收藏) + favorites/practice ORM + test_questions 17 单测全绿；user-web 题库页/详情页(Cue Card 渲染+收藏+跳练习入口)；type-check+build 通过；进入 Phase 7 |
 | 2026-07-23 | **Phase 7 练习系统全部完成** | practice 后端模块(会话创建/获取/完成 + attempt 创建/更新；状态机 + ADR-015 跨表约束) + test_practice 单测全绿；扩展 models/practice.py(PracticeSession/PracticeAttempt/Recording)；user-web PracticeView 状态机 UI + 进度统计 + QuestionDetailView 开始练习入口；路由 /practice/:id；type-check+build 通过(PracticeView 独立 chunk 7.80 kB)；进入 Phase 8 |
 | 2026-07-23 | **Phase 8 录音上传/下载全部完成** | core/storage.py(AudioStorage 抽象+LocalStorageBackend) + core/audio.py(mutagen 读 duration ADR-020) + 录音上传/下载 API(POST/GET /attempts/{id}/recording，事务一致性，5005/5003/5006/6001-6004 错误码) + study_records 同步(ADR-022 + ADR-018 timezone 切日) + models/activity.py(StudyRecord)；user-web composables/useRecorder.ts(MediaRecorder 状态机 IDLE→...→UPLOADED/ERROR) + PracticeView 集成录音 UI + 回放/下载 + api FormData 自动处理；test_practice 52 单测全绿；type-check+build 通过；进入 Phase 9 |
+| 2026-07-23 | **Phase 9 学习数据全部完成** | learning 后端模块(7 接口：overview/daily/weekly/monthly/topics/parts/recompute；ADR-008/016/018/022；streak 内存计算；事实表实时聚合；DELETE+INSERT 重算事务) + test_learning 25 单测全绿；user-web composables/useECharts.ts(ECharts 6 按需引入+resize/dispose) + LearningView.vue(概览卡片+趋势线柱混合+主题环图+Part 双轴柱状) + 路由 /learning；packages/types +13 learning DTO；全量 152 后端测试通过；type-check+build 通过(LearningView chunk 564KB 含 echarts)；进入 Phase 10 |

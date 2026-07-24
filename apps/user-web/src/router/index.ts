@@ -48,6 +48,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/PracticeView.vue'),
         props: true,
       },
+      // 学习数据页（Phase 9.5，受保护：learning.md §1.2 全接口 Bearer）
+      {
+        path: 'learning',
+        name: 'learning',
+        component: () => import('@/views/LearningView.vue'),
+      },
     ],
   },
 ]
