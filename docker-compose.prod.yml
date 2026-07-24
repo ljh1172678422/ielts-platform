@@ -1,0 +1,105 @@
+# IELTS Speaking Web App — 生产环境编排（Phase 12.2，system-architecture §1.2）
+#
+# 拓扑：单 nginx 网关（HTTPS 终止）→ backend + postgres
+#   user-web + admin-web 静态文件内嵌在 nginx 镜像中（构建期打包）
+#
+# 启动前准备：
+#   1. 复制 .env.production.example → .env.production，填入真实密钥
+#   2. 修改 nginx/nginx.conf 中的 server_name / 证书路径为实际域名
+#   3. 首次部署：用 bootstrap 配置启动 → Certbot 签发证书 → 切换 HTTPS 配置（见 deploy.md）
+#
+# 启动：
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#
+# 与 docker-compose.yml（开发）的区别：
+#   - 单 nginx 网关替代独立 user-web/admin-web 容器
+#   - env_file 注入生产密钥（不写入代码库）
+#   - postgres 密码来自环境变量（非硬编码）
+#   - backend workers=2 + 非root + healthcheck
+#   - 录音存储持久化卷 + DB 持久化卷
+#   - nginx 挂载 Let's Encrypt 证书目录
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ielts-postgres-prod
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata-prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    # 生产不暴露端口，仅内部网络可达
+
+  # 一次性服务：自动迁移 + 种子管理员（跑完即退出）
+  db-init:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ielts-db-init-prod
+    # USER app 在 Dockerfile 中设置；此处 command 覆盖运行迁移+seed
+    command: >-
+      sh -c "uv run alembic upgrade head &&
+             uv run python scripts/seed_admin.py"
+    env_file: .env.production
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_SYNC_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ielts-backend-prod
+    env_file: .env.production
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_SYNC_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      STORAGE_TYPE: local
+      STORAGE_LOCAL_PATH: /app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    volumes:
+      - backend-storage-prod:/app/storage
+    restart: unless-stopped
+    # 生产不暴露端口，由 nginx 网关反代
+
+  # 统一 nginx 网关：HTTPS 终止 + user-web/admin-web 静态 + /api 反代
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    container_name: ielts-nginx-prod
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      backend:
+        condition: service_started
+    volumes:
+      # Let's Encrypt 证书（宿主机签发，容器读取）
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # Certbot webroot（acme-challenge 续签用）
+      - certbot-webroot:/var/www/certbot
+    restart: unless-stopped
+
+volumes:
+  pgdata-prod:
+  backend-storage-prod:
+  certbot-webroot:

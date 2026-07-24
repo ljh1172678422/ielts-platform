@@ -17,7 +17,7 @@
 
 ## 2. 当前阶段
 
-**Phase 11 — 测试（已完成）** → 下一步 **Phase 12 — 部署**
+**Phase 12 — 部署（已完成）** → MVP 全部 13 阶段（0–12）交付完成
 
 ```text
 [完成] === Phase 0 文档设计阶段全部完成 ===
@@ -120,6 +120,24 @@
          permissions microphone + tsconfig.e2e.json 类型校验；test:e2e/test:e2e:ui 脚本)
          E2E 需本地 docker compose up postgres backend + pnpm dev 运行；沙箱仅保证类型正确
          35 前端单测 + 163 后端单测全绿；type-check + type-check:e2e + build 通过
+[完成] === Phase 12 部署 ===
+  - 12.1 生产 Dockerfile (backend: python3.12-slim + uv + 非root用户 + healthcheck + workers=2;
+         nginx: 多阶段构建 node:22 构建 user-web+admin-web → nginx:alpine 托管静态 + 反代 + HTTPS;
+         admin-web base=/admin/ 子路径部署)
+  - 12.2 生产 compose (docker-compose.prod.yml: postgres + db-init(一次性迁移+seed) +
+         backend + nginx; 3 持久化卷 pgdata-prod/backend-storage-prod/certbot-webroot;
+         depends_on condition 链 postgres→db-init→backend→nginx)
+  - 12.3 Nginx 配置 (nginx.conf: HTTPS 终止 + TLS 安全配置 + 安全响应头 + gzip +
+         /api 反代(client_max_body_size 60m) + /admin/ alias + / SPA fallback + 静态资源缓存;
+         nginx.bootstrap.conf: 首次部署 HTTP-only 供 Certbot 签发)
+  - 12.4 部署文档 (docs/deploy.md v0.1: 13 节 — 架构速查/前置要求/环境变量/首次部署两方案
+         (宿主机 Certbot standalone + webroot)/一键启动/验证/seed_admin/证书续签/运维/故障排查/
+         安全清单/回滚/附录; .env.production.example 强密钥生成指南)
+  - 12.5 seed_admin 生产用法 (验证: 模块容器内可导入; 生产密码强度校验 4 场景全通过;
+         APP_ENV=production 正确检测; deploy.md §7 文档化自动+手动重置两种方式;
+         .dockerignore 加固防 .env.production 泄漏到构建上下文)
+         沙箱无 Docker/Nginx, 仅做 YAML 语法验证 + 模块导入验证 + 配置审查;
+         docker compose up 实际验收需用户在 VPS 执行
 [待办-用户] === 本地 Docker 验证 ===
   ⚠ 沙箱不做预览/运行测试（无 Docker / 无 PG）。用户将在本地 docker compose up 后统一验证：
      - 1.6 四服务全绿 + /health 200
@@ -140,32 +158,27 @@
 
 ## 3. 当前任务
 
-- **Phase 11 测试已全部完成**（11.1–11.7）：后端 163 单测 + 前端 35 Vitest 单测 + Playwright E2E 脚本（练习录音完整闭环 + 续练场景关闭重开恢复）。
-- **下一步**：阶段 12 部署 —— 生产 Dockerfile + compose + Nginx + HTTPS + 部署文档 + 管理员初始化。
-- **沙箱不做预览/运行验证**（无 Docker / 无 PG）；用户将在本地 docker compose up 后统一验收（含 E2E）。
-- 沙箱侧仅保证：单测全绿、`type-check + type-check:e2e + build` 通过、`ruff` 通过。
+- **Phase 12 部署已全部完成**（12.1–12.5）：生产 Dockerfile（backend + nginx 多阶段）+ docker-compose.prod.yml + Nginx HTTPS 配置 + deploy.md 部署文档 + seed_admin 生产用法验证。
+- **MVP 全部 13 阶段（0–12）已交付完成**。
+- **下一步**：用户在 VPS 执行 `docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build` 实际验收（含 HTTPS 签发 + 全链路功能验证）。
+- **沙箱不做预览/运行验证**（无 Docker / 无 PG）；沙箱侧已保证：YAML 语法验证 + 模块导入验证 + 配置审查 + 单测全绿 + type-check + build + ruff。
 
-### 3.1 当前任务边界（阶段 12 生效）
+### 3.1 当前任务边界（MVP 已完成）
 
-**阶段 12 允许：**
-- 按 development-plan.md §14 顺序执行任务 12.1–12.5。
-- 编写生产 Dockerfile（backend/user-web/admin-web 多阶段构建）。
-- 编写生产 docker-compose.yml（+ nginx + postgres 持久化）。
-- 编写 Nginx 配置（反代 + 静态托管 + HTTPS）。
-- 编写部署文档 deploy.md。
-- 完善 seed_admin 脚本生产用法。
-- 一次只执行一个任务，完成即 commit + 更新 AI_CONTEXT。
+**MVP 全部阶段（0–12）已交付，后续为用户验收 + 运维阶段。**
 
-**禁止（阶段 12 仍生效）：**
-- ❌ 修改已锁定文档（PROJECT_SPEC / database-design / system-architecture / 全部 API 文档 / user-flow / development-plan）。
-- ❌ 改变 DB schema（阶段 2 已锁定 15 表 + 约束 + 索引；如需变更先走修改规则）。
-- ❌ 偏离 system-architecture §3 分层（router→service→repository，session 注入 repository）。
+如需新增功能或修复：
+- 遵循 development-plan.md §15 依赖关系图，新功能从对应阶段延伸。
+- 严格遵守已锁定文档（PROJECT_SPEC / database-design / system-architecture / 全部 API 文档 / user-flow / development-plan）。
+- 一次只做一个功能/模块/问题，完成即 commit + 更新 AI_CONTEXT。
+
+**仍禁止：**
+- ❌ 修改已锁定文档（除非走 §4.1 修改规则）。
+- ❌ 改变 DB schema（阶段 2 已锁定 15 表 + 约束 + 索引）。
+- ❌ 偏离 system-architecture §3 分层（router→service→repository）。
 - ❌ 改变统一响应结构 `{code,message,data,details?}`。
 - ❌ 改变状态机或核心事实链（ADR-015 attempt 跨表约束）。
 - ❌ 前端直设 attempt status=submitted（只能由录音上传事务设置）。
-- ❌ 一次性生成整个项目（PROJECT_SPEC §开发原则）。
-
-> 阶段 11 → 阶段 12 转换已由用户连续执行模式授权覆盖，无需再次确认。
 
 ---
 
@@ -307,6 +320,20 @@
 | 练习录音 E2E | `apps/user-web/tests-e2e/practice-recording.spec.ts` | ✅ | 完整闭环：登录→题库→创建会话→答题→录音(伪媒体流)→上传→回放→跳过→完成→学习数据统计更新（11.6） |
 | 续练场景 E2E | `apps/user-web/tests-e2e/resume-session.spec.ts` | ✅ | 关闭重开恢复：部分答题→关闭 context→首页续练入口→恢复会话→完成 + 已完成会话仅可查看（11.7） |
 
+**代码模块（Phase 12 部署）**：
+
+| 模块 | 路径 | 状态 | 验收 |
+| --- | --- | --- | --- |
+| 后端生产 Dockerfile | `backend/Dockerfile` | ✅ | python3.12-slim + uv + 非 root 用户(uid 1001) + healthcheck(/health) + workers=2 + storage 目录权限 |
+| Nginx 网关 Dockerfile | `nginx/Dockerfile` | ✅ | 多阶段构建：node:22 构建 user-web(base=/)+admin-web(base=/admin/) → nginx:alpine 托管静态 + 反代 + HTTPS + certbot webroot |
+| 生产 compose | `docker-compose.prod.yml` | ✅ | postgres+db-init(一次性迁移+seed)+backend+nginx；3 持久化卷；depends_on condition 链；YAML 语法验证通过 |
+| Nginx HTTPS 配置 | `nginx/nginx.conf` | ✅ | HTTP→HTTPS 重定向 + TLS 1.2/1.3 + 安全响应头(HSTS/X-Content-Type/X-Frame/Referrer) + gzip + /api 反代(60m) + /admin/ alias + / SPA fallback + 静态资源 30d 缓存 |
+| Nginx bootstrap 配置 | `nginx/nginx.bootstrap.conf` | ✅ | 首次部署 HTTP-only 供 Certbot 签发（ACME 验证 + 临时 /api + SPA） |
+| 环境变量模板 | `.env.production.example` | ✅ | POSTGRES/JWT/CORS/SEED_ADMIN/STORAGE 分组；强密钥生成指南（openssl rand） |
+| 部署文档 | `docs/deploy.md` | ✅ | v0.1 13 节：架构速查/前置要求/环境变量/首次部署两方案/一键启动/验证/seed_admin/证书续签/运维/故障排查/安全清单/回滚/附录 |
+| .dockerignore 加固 | `.dockerignore` | ✅ | 排除 .env.* / *.secret / tests-e2e / coverage 防泄漏到构建上下文 |
+| seed_admin 生产验证 | `backend/scripts/seed_admin.py` | ✅ | 模块容器内可导入 + 生产密码强度校验 4 场景全通过 + APP_ENV=production 正确检测 + 幂等 |
+
 **后端关键文件（Phase 3-4 已实现）**：
 - `backend/app/main.py` — create_app() 工厂 + /health + auth/users 路由注册
 - `backend/app/core/config.py` — pydantic-settings 配置（jwt_secret/algorithm/expires_seconds 等）
@@ -339,6 +366,7 @@
 | `docs/api/admin.md` | v0.1 | ✅ 完成（后台CRUD已锁定） |
 | `docs/product/user-flow.md` | v0.1 | ✅ 完成（用户流程已锁定） |
 | `docs/development-plan.md` | v0.1 | ✅ 完成（开发计划已锁定） |
+| `docs/deploy.md` | v0.1 | ✅ 完成（生产部署指南，Phase 12 新增） |
 
 ---
 
@@ -572,3 +600,4 @@ admin:       users / topics / tags / questions (CRUD + 启停)
 | 2026-07-23 | **Phase 9 学习数据全部完成** | learning 后端模块(7 接口：overview/daily/weekly/monthly/topics/parts/recompute；ADR-008/016/018/022；streak 内存计算；事实表实时聚合；DELETE+INSERT 重算事务) + test_learning 25 单测全绿；user-web composables/useECharts.ts(ECharts 6 按需引入+resize/dispose) + LearningView.vue(概览卡片+趋势线柱混合+主题环图+Part 双轴柱状) + 路由 /learning；packages/types +13 learning DTO；全量 152 后端测试通过；type-check+build 通过(LearningView chunk 564KB 含 echarts)；进入 Phase 10 |
 | 2026-07-24 | **Phase 10 首页全部完成** | home 后端模块(GET /home/overview 单接口聚合 + ADR-028 5 级推荐短路) + test_home 11 单测全绿；user-web HomeView 聚合仪表盘改造(今日统计+连续打卡+目标进度+未完成 session 续练入口+推荐列表 reason 标签)；packages/types +6 home DTO；163 后端单测全绿；type-check+build 通过；进入 Phase 11 |
 | 2026-07-24 | **Phase 11 测试全部完成** | 后端 163 单测全绿(Phase 4-10 随模块交付)；前端 Vitest 35 单测(auth.spec 14 + guards.spec 12 + LoginView.spec 9)；Playwright E2E 脚本(11.6 练习录音完整闭环 + 11.7 续练场景关闭重开恢复)；playwright.config.ts(webServer+伪媒体流+microphone 权限)+tsconfig.e2e.json+fixtures.ts；修复 Phase 11.5 mock 类型对齐(UserPublic.profile+AuthData 必填)；type-check+type-check:e2e+build 通过；E2E 需本地 docker compose up 运行；进入 Phase 12 |
+| 2026-07-24 | **Phase 12 部署全部完成 — MVP 交付完成** | 生产 Dockerfile(backend 非 root+healthcheck+workers=2 / nginx 多阶段构建 user-web+admin-web 静态) + docker-compose.prod.yml(postgres+db-init+backend+nginx, 3 持久化卷, depends_on condition 链) + nginx.conf(HTTPS 终止+TLS+安全头+gzip+/api 反代 60m+/admin/ alias+/ SPA fallback) + nginx.bootstrap.conf(首次部署 Certbot 签发用) + .env.production.example(强密钥生成指南) + docs/deploy.md v0.1(13 节完整部署指南) + seed_admin 生产验证(密码强度 4 场景+APP_ENV 检测+幂等) + .dockerignore 加固防 .env.production 泄漏；YAML 语法+模块导入验证通过；**MVP 全部 13 阶段(0-12)交付完成** |

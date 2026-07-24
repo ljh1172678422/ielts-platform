@@ -1,4 +1,4 @@
-# 通用排除（适用于根上下文构建：user-web / admin-web）
+# 通用排除（适用于根上下文构建：nginx 多阶段构建 user-web + admin-web）
 **/node_modules
 **/.venv
 **/dist
@@ -6,9 +6,16 @@
 **/__pycache__
 **/.pytest_cache
 **/.ruff_cache
+**/.mypy_cache
 **/storage
+**/tests-e2e
+**/playwright-report
+**/test-results
+**/coverage
 *.md
 docs/
 .gitignore
+# 所有 env 文件均不进入构建上下文（含生产密钥，防泄漏）
 .env
-.env.local
+.env.*
+*.secret
