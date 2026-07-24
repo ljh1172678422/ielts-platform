@@ -17,7 +17,7 @@
 
 ## 2. 当前阶段
 
-**Phase 10 — 首页（已完成）** → 下一步 **Phase 11 — 测试**
+**Phase 11 — 测试（已完成）** → 下一步 **Phase 12 — 部署**
 
 ```text
 [完成] === Phase 0 文档设计阶段全部完成 ===
@@ -105,6 +105,21 @@
          推荐列表含 reason 标签(5 种颜色映射) + 点击跳题目详情；
          packages/types 增加 6 个 home DTO (HomeOverview/Recommendation/RecommendationReason 等))
          test_home 11 单测全绿；163 后端单测全绿；ruff 通过；type-check + build 通过
+[完成] === Phase 11 测试 ===
+  - 11.1-11.4 后端测试 (auth/practice/recording/learning 单测已在前序阶段交付，共 163 单测全绿)
+  - 11.5 前端登录流程 Vitest (auth.spec 14 + guards.spec 12 + LoginView.spec 9 = 35 单测全绿；
+         覆盖 setAuth/clearAuth/login/register/logout/fetchProfile + 路由守卫未登录/已登录跳转 +
+         LoginView 渲染/登录成功跳转/失败不跳转/loading 状态；mock 数据对齐 UserPublic.profile+AuthData 必填)
+  - 11.6 前端练习录音 Playwright E2E (tests-e2e/practice-recording.spec.ts: 完整闭环
+         登录→题库→创建会话→答题→录音(伪媒体流)→上传→回放→跳过→完成会话→学习数据统计更新；
+         Chromium --use-fake-device-for-media-stream 无需真实麦克风)
+  - 11.7 续练场景 Playwright E2E (tests-e2e/resume-session.spec.ts: 关闭重开恢复
+         部分答题→关闭 context→新 context 登录→首页 recent_practice.has_unfinished→继续练习→
+         恢复会话状态(submitted/pending)→完成；+ 已完成会话仅可查看不可操作)
+  - Playwright 配置 (playwright.config.ts: webServer 自动起 dev server + 单 worker 串行 +
+         permissions microphone + tsconfig.e2e.json 类型校验；test:e2e/test:e2e:ui 脚本)
+         E2E 需本地 docker compose up postgres backend + pnpm dev 运行；沙箱仅保证类型正确
+         35 前端单测 + 163 后端单测全绿；type-check + type-check:e2e + build 通过
 [待办-用户] === 本地 Docker 验证 ===
   ⚠ 沙箱不做预览/运行测试（无 Docker / 无 PG）。用户将在本地 docker compose up 后统一验证：
      - 1.6 四服务全绿 + /health 200
@@ -116,28 +131,32 @@
      - 8.x 录音上传/下载/回放 + study_records 同步 + duration 后端计算
      - 9.x 学习概览/趋势/分布/重算（含 streak 算法/时区切日/ECharts 渲染）
      - 10.x 首页聚合 + 5 级推荐（确定性可复现）
-  沙箱侧只保证：单测全绿、type-check + build 通过、ruff 通过、迁移 offline SQL 语法正确。
-[待办]   Phase 11+ 测试/部署
+     - 11.x E2E 练习录音完整闭环 + 续练场景关闭重开恢复（需本地 docker compose up + pnpm dev + 测试账号）
+  沙箱侧只保证：单测全绿、type-check + type-check:e2e + build 通过、ruff 通过、迁移 offline SQL 语法正确。
+[待办]   Phase 12 部署
 ```
 
 ---
 
 ## 3. 当前任务
 
-- **Phase 10 首页已全部完成**（10.1–10.2）：home 后端模块（GET /home/overview 单接口聚合 + ADR-028 5 级推荐短路）+ user-web HomeView 聚合仪表盘改造（推荐含 reason 标签）。
-- **下一步**：阶段 11 测试 —— 补充端到端测试（后端 auth/practice/recording/learning + 前端登录/练习录音流程）。
-- **沙箱不做预览/运行验证**（无 Docker / 无 PG）；用户将在本地 docker compose up 后统一验收。
-- 沙箱侧仅保证：单测全绿、`type-check + build` 通过、`ruff` 通过。
+- **Phase 11 测试已全部完成**（11.1–11.7）：后端 163 单测 + 前端 35 Vitest 单测 + Playwright E2E 脚本（练习录音完整闭环 + 续练场景关闭重开恢复）。
+- **下一步**：阶段 12 部署 —— 生产 Dockerfile + compose + Nginx + HTTPS + 部署文档 + 管理员初始化。
+- **沙箱不做预览/运行验证**（无 Docker / 无 PG）；用户将在本地 docker compose up 后统一验收（含 E2E）。
+- 沙箱侧仅保证：单测全绿、`type-check + type-check:e2e + build` 通过、`ruff` 通过。
 
-### 3.1 当前任务边界（阶段 11 生效）
+### 3.1 当前任务边界（阶段 12 生效）
 
-**阶段 11 允许：**
-- 按 development-plan.md §13 顺序执行任务 11.1–11.6。
-- 补充后端测试（auth/practice/recording/learning 端到端，对齐 ADR-015/状态机/事务回滚）。
-- 补充前端测试（Vitest/Playwright 登录跳转 + 练习录音完整闭环）。
+**阶段 12 允许：**
+- 按 development-plan.md §14 顺序执行任务 12.1–12.5。
+- 编写生产 Dockerfile（backend/user-web/admin-web 多阶段构建）。
+- 编写生产 docker-compose.yml（+ nginx + postgres 持久化）。
+- 编写 Nginx 配置（反代 + 静态托管 + HTTPS）。
+- 编写部署文档 deploy.md。
+- 完善 seed_admin 脚本生产用法。
 - 一次只执行一个任务，完成即 commit + 更新 AI_CONTEXT。
 
-**禁止（阶段 11 仍生效）：**
+**禁止（阶段 12 仍生效）：**
 - ❌ 修改已锁定文档（PROJECT_SPEC / database-design / system-architecture / 全部 API 文档 / user-flow / development-plan）。
 - ❌ 改变 DB schema（阶段 2 已锁定 15 表 + 约束 + 索引；如需变更先走修改规则）。
 - ❌ 偏离 system-architecture §3 分层（router→service→repository，session 注入 repository）。
@@ -146,7 +165,7 @@
 - ❌ 前端直设 attempt status=submitted（只能由录音上传事务设置）。
 - ❌ 一次性生成整个项目（PROJECT_SPEC §开发原则）。
 
-> 阶段 10 → 阶段 11 转换已由用户连续执行模式授权覆盖，无需再次确认。
+> 阶段 11 → 阶段 12 转换已由用户连续执行模式授权覆盖，无需再次确认。
 
 ---
 
@@ -273,6 +292,20 @@
 | user-web 首页改造 | `apps/user-web/src/views/HomeView.vue` | ✅ | 未登录落地页 + 已登录聚合仪表盘（今日统计 4 卡片 + 连续打卡/目标进度双栏 + 未完成 session 继续练习入口 + 推荐列表含 reason 标签 5 种颜色映射 + 点击跳题目详情）；type-check+build 通过 |
 | 共享类型（首页域） | `packages/types/src/index.ts` | ✅ | +HomeOverview/HomeGoalProgress/RecentPractice/UnfinishedSessionSummary/Recommendation/RecommendationReason |
 | test_home | `backend/tests/test_home.py` | ✅ | 11 单测全绿（recommendation_limit 校验 + recent_practice + 5 级推荐短路 + 跨级去重 + goal_progress 扩展） |
+
+**代码模块（Phase 11 测试）**：
+
+| 模块 | 路径 | 状态 | 验收 |
+| --- | --- | --- | --- |
+| 后端单测 | `backend/tests/test_*.py` | ✅ | 163 单测全绿（auth/practice/recording/learning/home/admin/users/questions，Phase 4-10 随模块交付） |
+| auth store 单测 | `apps/user-web/src/stores/auth.spec.ts` | ✅ | 14 单测：setAuth/clearAuth/login/register/logout/fetchProfile + isAdmin getter；mock 对齐 UserPublic.profile+AuthData 必填 |
+| 路由守卫单测 | `apps/user-web/src/router/guards.spec.ts` | ✅ | 12 单测：未登录访问 public/受保护页 + 已登录访问 public/受保护页 + redirect 回跳 |
+| LoginView 单测 | `apps/user-web/src/views/LoginView.spec.ts` | ✅ | 9 单测：表单渲染 + 成功登录跳转(redirect) + 失败不跳转(3002/9003) + loading 状态 |
+| Vitest 配置 | `apps/user-web/vitest.config.ts` + `src/test/setup.ts` | ✅ | jsdom 环境 + @ alias + 全局 setup（localStorage/sessionStorage 清理 + mock 恢复） |
+| Playwright 配置 | `apps/user-web/playwright.config.ts` + `tsconfig.e2e.json` | ✅ | webServer 自动起 dev server + 单 worker 串行 + microphone 权限 + 伪媒体流；type-check:e2e 通过 |
+| E2E fixtures | `apps/user-web/tests-e2e/fixtures.ts` | ✅ | loginViaUI/loginViaAPI + authedRequest + createSession/Attempt/patch + injectToken + 进度统计工具 |
+| 练习录音 E2E | `apps/user-web/tests-e2e/practice-recording.spec.ts` | ✅ | 完整闭环：登录→题库→创建会话→答题→录音(伪媒体流)→上传→回放→跳过→完成→学习数据统计更新（11.6） |
+| 续练场景 E2E | `apps/user-web/tests-e2e/resume-session.spec.ts` | ✅ | 关闭重开恢复：部分答题→关闭 context→首页续练入口→恢复会话→完成 + 已完成会话仅可查看（11.7） |
 
 **后端关键文件（Phase 3-4 已实现）**：
 - `backend/app/main.py` — create_app() 工厂 + /health + auth/users 路由注册
@@ -537,3 +570,5 @@ admin:       users / topics / tags / questions (CRUD + 启停)
 | 2026-07-23 | **Phase 7 练习系统全部完成** | practice 后端模块(会话创建/获取/完成 + attempt 创建/更新；状态机 + ADR-015 跨表约束) + test_practice 单测全绿；扩展 models/practice.py(PracticeSession/PracticeAttempt/Recording)；user-web PracticeView 状态机 UI + 进度统计 + QuestionDetailView 开始练习入口；路由 /practice/:id；type-check+build 通过(PracticeView 独立 chunk 7.80 kB)；进入 Phase 8 |
 | 2026-07-23 | **Phase 8 录音上传/下载全部完成** | core/storage.py(AudioStorage 抽象+LocalStorageBackend) + core/audio.py(mutagen 读 duration ADR-020) + 录音上传/下载 API(POST/GET /attempts/{id}/recording，事务一致性，5005/5003/5006/6001-6004 错误码) + study_records 同步(ADR-022 + ADR-018 timezone 切日) + models/activity.py(StudyRecord)；user-web composables/useRecorder.ts(MediaRecorder 状态机 IDLE→...→UPLOADED/ERROR) + PracticeView 集成录音 UI + 回放/下载 + api FormData 自动处理；test_practice 52 单测全绿；type-check+build 通过；进入 Phase 9 |
 | 2026-07-23 | **Phase 9 学习数据全部完成** | learning 后端模块(7 接口：overview/daily/weekly/monthly/topics/parts/recompute；ADR-008/016/018/022；streak 内存计算；事实表实时聚合；DELETE+INSERT 重算事务) + test_learning 25 单测全绿；user-web composables/useECharts.ts(ECharts 6 按需引入+resize/dispose) + LearningView.vue(概览卡片+趋势线柱混合+主题环图+Part 双轴柱状) + 路由 /learning；packages/types +13 learning DTO；全量 152 后端测试通过；type-check+build 通过(LearningView chunk 564KB 含 echarts)；进入 Phase 10 |
+| 2026-07-24 | **Phase 10 首页全部完成** | home 后端模块(GET /home/overview 单接口聚合 + ADR-028 5 级推荐短路) + test_home 11 单测全绿；user-web HomeView 聚合仪表盘改造(今日统计+连续打卡+目标进度+未完成 session 续练入口+推荐列表 reason 标签)；packages/types +6 home DTO；163 后端单测全绿；type-check+build 通过；进入 Phase 11 |
+| 2026-07-24 | **Phase 11 测试全部完成** | 后端 163 单测全绿(Phase 4-10 随模块交付)；前端 Vitest 35 单测(auth.spec 14 + guards.spec 12 + LoginView.spec 9)；Playwright E2E 脚本(11.6 练习录音完整闭环 + 11.7 续练场景关闭重开恢复)；playwright.config.ts(webServer+伪媒体流+microphone 权限)+tsconfig.e2e.json+fixtures.ts；修复 Phase 11.5 mock 类型对齐(UserPublic.profile+AuthData 必填)；type-check+type-check:e2e+build 通过；E2E 需本地 docker compose up 运行；进入 Phase 12 |

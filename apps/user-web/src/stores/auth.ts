@@ -77,6 +77,8 @@ export const useAuthStore = defineStore('auth', {
     async logout(): Promise<void> {
       try {
         await api.post<null>('/auth/logout')
+      } catch {
+        // 失败不阻塞：写日志失败不影响退出（ADR-027 无状态退出）
       } finally {
         this.clearAuth()
       }

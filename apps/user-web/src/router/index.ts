@@ -67,13 +67,14 @@ const router = createRouter({
  * 全局前置守卫（auth.md §5.4 / user-flow.md）：
  * - 已认证访问 public 页（/login /register）→ 跳首页，避免重复登录
  * - 未认证访问受保护页（meta.public 非 true）→ 跳 /login，带 redirect 回跳
+ * - 首页本身为 public（落地页+仪表盘双用途），已认证访问首页直接放行
  */
 router.beforeEach((to) => {
   const authStore = useAuthStore()
   const isPublic = to.meta.public === true
 
-  // 已登录访问公开页 → 回首页
-  if (isPublic && authStore.isAuthenticated) {
+  // 已登录访问公开页（排除首页自身）→ 回首页，避免重复登录
+  if (isPublic && authStore.isAuthenticated && to.name !== 'home') {
     return { name: 'home' }
   }
   // 未登录访问受保护页 → 跳登录，带 redirect
